@@ -3,6 +3,18 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { resolveWithinRoot } from './fsBrowse.js';
 
+const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff']);
+const VIDEO_EXT = new Set(['.mp4', '.mkv', '.mov', '.avi', '.webm', '.m4v', '.mpg', '.mpeg', '.ts']);
+const AUDIO_EXT = new Set(['.mp3', '.wav', '.aac', '.flac', '.ogg', '.m4a', '.opus']);
+
+function guessKindFromExtension(relPath) {
+  const ext = path.posix.extname(relPath ?? '').toLowerCase();
+  if (IMAGE_EXT.has(ext)) return 'image';
+  if (VIDEO_EXT.has(ext)) return 'video';
+  if (AUDIO_EXT.has(ext)) return 'audio';
+  return 'unknown';
+}
+
 function runFfprobe(fileAbsPath) {
   return new Promise((resolve, reject) => {
     const args = [
@@ -130,7 +142,15 @@ export async function analyzeFiles(mediaRoot, relPaths) {
       const ffprobeJson = await runFfprobe(targetAbs);
       results.push(normalizeAnalysis(relative, stats, ffprobeJson));
     } catch (err) {
-      results.push({ path: relative, error: err?.message ?? 'Analyze failed' });
+      // Even when ffprobe fails, keep enough metadata so it can be persisted to DB.
+      results.push({
+        path: relative,
+        name: path.posix.basename(relative),
+        kind: guessKindFromExtension(relative),
+        sizeBytes: stats.size,
+        modifiedAt: stats.mtime.toISOString(),
+        error: err?.message ?? 'Analyze failed'
+      });
     }
   }
 

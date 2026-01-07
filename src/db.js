@@ -54,11 +54,11 @@ export async function ensureSchema(pool) {
 }
 
 export async function upsertAnalyses(pool, analyses) {
-  if (!pool) return;
+  if (!pool) return { attempted: 0, stored: 0 };
   const items = Array.isArray(analyses) ? analyses : [];
 
-  const ok = items.filter((a) => a && !a.error && a.path);
-  if (ok.length === 0) return;
+  const rows = items.filter((a) => a && a.path);
+  if (rows.length === 0) return { attempted: 0, stored: 0 };
 
   const sql = `
     INSERT INTO media_analysis (
@@ -87,7 +87,8 @@ export async function upsertAnalyses(pool, analyses) {
       data = EXCLUDED.data;
   `;
 
-  for (const a of ok) {
+  let stored = 0;
+  for (const a of rows) {
     await pool.query(sql, [
       a.path,
       a.kind ?? null,
@@ -102,7 +103,10 @@ export async function upsertAnalyses(pool, analyses) {
       a.bitRate ?? null,
       a
     ]);
+    stored++;
   }
+
+  return { attempted: rows.length, stored };
 }
 
 export async function getAnalysesByPaths(pool, paths) {

@@ -227,9 +227,9 @@ app.post('/api/analyze', async (req, res) => {
     });
 
     const results = await analyzeFiles(mediaRoot, normalized);
-    await upsertAnalyses(dbPool, results);
+    const dbWrite = await upsertAnalyses(dbPool, results);
     const dashboard = buildDashboard(results);
-    res.json({ results, dashboard });
+    res.json({ results, dashboard, db: dbWrite });
   } catch (err) {
     res.status(400).json({ error: err?.message ?? 'Bad request' });
   }
@@ -381,16 +381,18 @@ app.post('/api/analyze-all', async (req, res) => {
 
     let analyzedOk = 0;
     let analyzedErr = 0;
+    let stored = 0;
     for (const batch of batches) {
       const results = await analyzeFiles(mediaRoot, batch);
-      await upsertAnalyses(dbPool, results);
+      const dbWrite = await upsertAnalyses(dbPool, results);
+      stored += dbWrite?.stored ?? 0;
       for (const r of results) {
         if (r?.error) analyzedErr++;
         else analyzedOk++;
       }
     }
 
-    res.json({ analyzed: analyzedOk, errors: analyzedErr });
+    res.json({ analyzed: analyzedOk, errors: analyzedErr, db: { stored } });
   } catch (err) {
     res.status(500).json({ error: err?.message ?? 'Analyze-all failed' });
   }
@@ -403,6 +405,7 @@ function startMediaWatcher() {
   const debounceMs = Number(process.env.WATCH_DEBOUNCE_MS ?? 2000);
   const delayMs = Number.isFinite(debounceMs) && debounceMs >= 0 ? debounceMs : 2000;
   const pending = new Map();
+  const lastSignatureByRelPath = new Map();
 
   const schedule = (absPath) => {
     if (!absPath) return;
@@ -415,10 +418,22 @@ function startMediaWatcher() {
         const rel = path.relative(mediaRoot, absPath).split(path.sep).join('/');
         // Ensure it's still within root
         const resolved = resolveWithinRoot(mediaRoot, rel);
+
+        // Deduplicate noisy watcher events: if the file didn't change (size/mtime), skip.
+        // Some filesystems can emit repeated "change" events even for reads.
+        const st = await fs.stat(absPath);
+        if (!st.isFile()) return;
+        const sig = { mtimeMs: st.mtimeMs, size: st.size };
+        const prev = lastSignatureByRelPath.get(resolved.relative);
+        if (prev && prev.mtimeMs === sig.mtimeMs && prev.size === sig.size) {
+          return;
+        }
+        lastSignatureByRelPath.set(resolved.relative, sig);
+
         const results = await analyzeFiles(mediaRoot, [resolved.relative]);
-        await upsertAnalyses(dbPool, results);
+        const dbWrite = await upsertAnalyses(dbPool, results);
         // eslint-disable-next-line no-console
-        console.log(`Auto-analyzed: ${resolved.relative}`);
+        console.log(`Auto-analyzed: ${resolved.relative} (db stored: ${dbWrite?.stored ?? 0})`);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error(`Auto-analyze failed for ${absPath}: ${err?.message ?? err}`);
