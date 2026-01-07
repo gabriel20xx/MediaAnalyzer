@@ -111,6 +111,29 @@ h2 { font-size: 16px; }
   margin-left: auto;
 }
 
+.thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+  background: #0a0e16;
+  flex: 0 0 auto;
+}
+
+.thumbPh {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0a0e16;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+
 .itemName {
   flex: 1;
   min-width: 0;
@@ -291,6 +314,27 @@ h2 { font-size: 16px; }
   width: 100%;
 }
 
+.preview {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.previewMedia {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0a0e16;
+  max-width: 320px;
+  max-height: 180px;
+  width: 100%;
+}
+
+.previewActions {
+  display: flex;
+  gap: 10px;
+}
+
 .detailsHeader {
   display: flex;
   align-items: baseline;
@@ -354,7 +398,7 @@ h2 { font-size: 16px; }
 
 .tableRow {
   display: grid;
-  grid-template-columns: 1.5fr 80px 110px 120px 120px 100px;
+  grid-template-columns: 56px 1.5fr 80px 110px 120px 120px 100px;
   gap: 10px;
   padding: 10px;
   border-bottom: 1px solid var(--border);

@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { browsePath, resolveWithinRoot } from './fsBrowse.js';
 import { analyzeFiles } from './analyze.js';
 import { compareAnalyses } from './compare.js';
@@ -19,6 +20,125 @@ app.use(express.static(path.join(__dirname, '../public')));
 const port = Number(process.env.PORT ?? 3000);
 const mediaRoot = process.env.MEDIA_ROOT ?? '/media';
 const dbPool = createPool();
+
+// Serve mounted media for in-app preview/playback.
+// express.static supports Range requests, which is important for video/audio streaming.
+app.use('/media', express.static(mediaRoot, {
+  fallthrough: false,
+  dotfiles: 'deny',
+  etag: true,
+  maxAge: '1h',
+  setHeaders(res) {
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  }
+}));
+
+const VIDEO_EXT = new Set(['.mp4', '.mkv', '.mov', '.avi', '.webm', '.m4v', '.mpg', '.mpeg', '.ts']);
+const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff']);
+
+const thumbCache = new Map();
+const thumbCacheOrder = [];
+const THUMB_CACHE_MAX = Number(process.env.THUMB_CACHE_MAX ?? 250);
+
+function setThumbCache(key, buf) {
+  if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) return;
+  if (thumbCache.has(key)) return;
+  thumbCache.set(key, buf);
+  thumbCacheOrder.push(key);
+  while (thumbCacheOrder.length > THUMB_CACHE_MAX) {
+    const old = thumbCacheOrder.shift();
+    if (old) thumbCache.delete(old);
+  }
+}
+
+async function generateThumbnailJpeg({ absPath, isVideo, width }) {
+  const w = Number.isFinite(width) && width > 0 ? width : 160;
+  const vf = `scale=${w}:-2:force_original_aspect_ratio=decrease`;
+
+  const args = [
+    '-hide_banner',
+    '-loglevel', 'error'
+  ];
+  if (isVideo) {
+    // Grab a frame a little bit in for better thumbnails.
+    args.push('-ss', '00:00:01');
+  }
+  args.push(
+    '-i', absPath,
+    '-vf', vf,
+    '-frames:v', '1',
+    '-f', 'image2pipe',
+    '-vcodec', 'mjpeg',
+    '-q:v', '6',
+    'pipe:1'
+  );
+
+  return await new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', args, { windowsHide: true });
+    const chunks = [];
+    let total = 0;
+    let stderr = '';
+
+    ff.stdout.on('data', (d) => {
+      chunks.push(d);
+      total += d.length;
+      if (total > 6 * 1024 * 1024) {
+        ff.kill('SIGKILL');
+        reject(new Error('Thumbnail too large'));
+      }
+    });
+    ff.stderr.on('data', (d) => {
+      stderr += d.toString('utf8');
+      if (stderr.length > 8000) stderr = stderr.slice(-8000);
+    });
+    ff.on('error', (e) => reject(e));
+    ff.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`));
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
+  });
+}
+
+app.get('/api/thumbnail', async (req, res) => {
+  try {
+    const relPath = typeof req.query.path === 'string' ? req.query.path : '';
+    if (!relPath) return res.status(400).json({ error: 'path is required' });
+
+    const widthRaw = typeof req.query.w === 'string' ? Number(req.query.w) : 160;
+    const width = Number.isFinite(widthRaw) ? Math.min(Math.max(Math.floor(widthRaw), 48), 512) : 160;
+
+    const resolved = resolveWithinRoot(mediaRoot, relPath);
+    const ext = path.extname(resolved.relative).toLowerCase();
+    const isVideo = VIDEO_EXT.has(ext);
+    const isImage = IMAGE_EXT.has(ext);
+    if (!isVideo && !isImage) return res.status(415).json({ error: 'Unsupported media type for thumbnails' });
+
+    const absPath = path.join(mediaRoot, ...resolved.relative.split('/'));
+    const st = await fs.stat(absPath);
+    if (!st.isFile()) return res.status(404).json({ error: 'Not a file' });
+
+    const cacheKey = `${resolved.relative}|${width}|${st.mtimeMs}|${st.size}`;
+    const cached = thumbCache.get(cacheKey);
+    if (cached) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.end(cached);
+    }
+
+    const jpeg = await generateThumbnailJpeg({ absPath, isVideo, width });
+    if (!jpeg || jpeg.length === 0) return res.status(404).json({ error: 'Failed to generate thumbnail' });
+
+    setThumbCache(cacheKey, jpeg);
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.end(jpeg);
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? 'Thumbnail failed' });
+  }
+});
 
 async function listAllFilesRecursive(absRoot, relBase = '') {
   const absDir = path.join(absRoot, relBase);

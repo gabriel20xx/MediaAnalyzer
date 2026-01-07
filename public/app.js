@@ -7,6 +7,8 @@ let expanded = new Set();
 let analysisByPath = new Map();
 let isAnalyzing = false;
 
+const STORAGE_SELECTED_KEY = 'mediaanalyzer:selectedPaths';
+
 let searchTimer = null;
 let searchResults = [];
 
@@ -21,6 +23,155 @@ const searchFilters = {
 };
 
 const el = (id) => document.getElementById(id);
+
+function saveSelectionToStorage() {
+  try {
+    const items = Array.from(selected.values()).filter((p) => typeof p === 'string' && p.trim());
+    localStorage.setItem(STORAGE_SELECTED_KEY, JSON.stringify(items));
+  } catch {
+    // ignore
+  }
+}
+
+function restoreSelectionFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_SELECTED_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    selected = new Set(parsed.filter((p) => typeof p === 'string' && p.trim()));
+  } catch {
+    // ignore
+  }
+}
+
+function encodePathForUrl(relPath) {
+  const p = (relPath ?? '').replace(/^\/+/, '');
+  return p.split('/').map((seg) => encodeURIComponent(seg)).join('/');
+}
+
+function mediaUrl(relPath) {
+  return `/media/${encodePathForUrl(relPath)}`;
+}
+
+function thumbnailUrl(relPath, width = 96) {
+  const w = Number.isFinite(width) ? Math.floor(width) : 96;
+  return `/api/thumbnail?path=${encodeURIComponent(relPath)}&w=${encodeURIComponent(String(w))}`;
+}
+
+function baseNameFromPath(p) {
+  const parts = (p ?? '').split('/').filter(Boolean);
+  return parts[parts.length - 1] ?? '';
+}
+
+const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff']);
+const VIDEO_EXT = new Set(['.mp4', '.mkv', '.mov', '.avi', '.webm', '.m4v', '.mpg', '.mpeg', '.ts']);
+const AUDIO_EXT = new Set(['.mp3', '.wav', '.aac', '.flac', '.ogg', '.m4a', '.opus']);
+
+function guessKindFromPath(p) {
+  const name = baseNameFromPath(p).toLowerCase();
+  const dot = name.lastIndexOf('.');
+  const ext = dot >= 0 ? name.slice(dot) : '';
+  if (IMAGE_EXT.has(ext)) return 'image';
+  if (VIDEO_EXT.has(ext)) return 'video';
+  if (AUDIO_EXT.has(ext)) return 'audio';
+  return '';
+}
+
+function requestFullscreenSafe(targetEl) {
+  const fn = targetEl?.requestFullscreen
+    || targetEl?.webkitRequestFullscreen
+    || targetEl?.msRequestFullscreen;
+
+  if (!fn) {
+    setStatus('Fullscreen is not supported in this browser.', false);
+    return;
+  }
+  Promise.resolve(fn.call(targetEl)).catch((e) => {
+    setStatus(e?.message || 'Failed to enter fullscreen.', false);
+  });
+}
+
+function renderThumb(relPath, kindHint = '') {
+  const kind = kindHint || guessKindFromPath(relPath);
+  if (kind === 'image' || kind === 'video') {
+    const img = document.createElement('img');
+    img.className = 'thumb';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = kind;
+    img.src = thumbnailUrl(relPath, 96);
+    img.onerror = () => {
+      img.style.display = 'none';
+    };
+    return img;
+  }
+  const ph = document.createElement('div');
+  ph.className = 'thumbPh';
+  ph.textContent = kind ? kind.toUpperCase() : 'FILE';
+  return ph;
+}
+
+function renderMediaPreview(analysisOrPath) {
+  const pathValue = typeof analysisOrPath === 'string' ? analysisOrPath : (analysisOrPath?.path ?? '');
+  if (!pathValue) return null;
+
+  const kindHint = typeof analysisOrPath === 'string' ? '' : (analysisOrPath?.kind ?? '');
+  const kind = kindHint || guessKindFromPath(pathValue);
+
+  if (!kind) return null;
+
+  const preview = document.createElement('div');
+  preview.className = 'preview';
+
+  const media = (() => {
+    if (kind === 'video') {
+      const v = document.createElement('video');
+      v.className = 'previewMedia';
+      v.controls = true;
+      v.preload = 'metadata';
+      v.playsInline = true;
+      v.src = mediaUrl(pathValue);
+      return v;
+    }
+    if (kind === 'audio') {
+      const a = document.createElement('audio');
+      a.className = 'previewMedia';
+      a.controls = true;
+      a.preload = 'metadata';
+      a.src = mediaUrl(pathValue);
+      return a;
+    }
+    if (kind === 'image') {
+      const img = document.createElement('img');
+      img.className = 'previewMedia';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = baseNameFromPath(pathValue);
+      img.src = mediaUrl(pathValue);
+      return img;
+    }
+    return null;
+  })();
+
+  if (!media) return null;
+  preview.appendChild(media);
+
+  if (kind === 'image' || kind === 'video') {
+    const actions = document.createElement('div');
+    actions.className = 'previewActions';
+
+    const fsBtn = document.createElement('button');
+    fsBtn.className = 'btn';
+    fsBtn.textContent = 'Fullscreen';
+    fsBtn.onclick = () => requestFullscreenSafe(media);
+
+    actions.appendChild(fsBtn);
+    preview.appendChild(actions);
+  }
+
+  return preview;
+}
 
 function joinPath(base, name) {
   const b = (base ?? '').replace(/^\/+/, '').replace(/\/+$/, '');
@@ -126,6 +277,10 @@ function renderAnalysisDetails(analysis) {
     wrap.textContent = 'No details available.';
     return wrap;
   }
+
+  const preview = renderMediaPreview(analysis);
+  if (preview) wrap.appendChild(preview);
+
   if (analysis.error) {
     const header = document.createElement('div');
     header.className = 'detailsHeader';
@@ -322,7 +477,7 @@ function renderSearchTable() {
 
   const header = document.createElement('div');
   header.className = 'tableRow tableHeader';
-  const headers = ['File', 'Kind', 'Size', 'Video', 'Audio', 'Res'];
+  const headers = ['Preview', 'File', 'Kind', 'Size', 'Video', 'Audio', 'Res'];
   for (const h of headers) {
     const c = document.createElement('div');
     c.className = 'cell';
@@ -352,6 +507,12 @@ function renderSearchTable() {
       renderSearchTable();
     };
 
+    const kindHint = a?.kind ?? '';
+    const thumbCell = document.createElement('div');
+    thumbCell.className = 'cell';
+    if (p) thumbCell.appendChild(renderThumb(p, kindHint));
+    row.appendChild(thumbCell);
+
     const cells = [
       a?.name ?? a?.path,
       a?.kind,
@@ -374,6 +535,7 @@ function renderSearchTable() {
       ev.stopPropagation();
       if (!p) return;
       selected.add(p);
+      saveSelectionToStorage();
       renderSelected();
       browse(currentPath);
       scheduleAnalyze();
@@ -455,22 +617,62 @@ function renderSelected() {
   const items = Array.from(selected.values()).sort((a, b) => a.localeCompare(b));
   for (const p of items) {
     const li = document.createElement('li');
+
+    const known = analysisByPath.get(p);
+    const kindHint = known?.kind ?? '';
+    li.appendChild(renderThumb(p, kindHint));
+
     const name = document.createElement('span');
     name.className = 'itemName';
     name.textContent = p;
     li.appendChild(name);
 
-    const btn = document.createElement('button');
-    btn.className = 'btn';
-    btn.textContent = 'Remove';
-    btn.onclick = () => {
+    const btnDetails = document.createElement('button');
+    btnDetails.className = 'btn';
+    btnDetails.textContent = expanded.has(p) ? 'Hide' : 'Details';
+    btnDetails.onclick = async () => {
+      if (expanded.has(p)) {
+        expanded.delete(p);
+        renderSelected();
+        return;
+      }
+
+      expanded.add(p);
+      // Try to load details from DB if we don't have it yet.
+      if (!analysisByPath.has(p)) {
+        try {
+          const data = await loadFromDb([p]);
+          const r = Array.isArray(data.results) ? data.results[0] : null;
+          if (r && r.path && !r.error) analysisByPath.set(r.path, r);
+        } catch {
+          // ignore
+        }
+      }
+      renderSelected();
+    };
+
+    const btnRemove = document.createElement('button');
+    btnRemove.className = 'btn';
+    btnRemove.textContent = 'Remove';
+    btnRemove.onclick = () => {
+      expanded.delete(p);
       selected.delete(p);
+      saveSelectionToStorage();
       renderSelected();
       scheduleAnalyze();
     };
 
-    li.appendChild(btn);
+    li.appendChild(btnDetails);
+    li.appendChild(btnRemove);
     list.appendChild(li);
+
+    if (expanded.has(p)) {
+      const analysis = analysisByPath.get(p);
+      const detailsRow = document.createElement('li');
+      detailsRow.className = 'detailsRow';
+      detailsRow.appendChild(renderAnalysisDetails(analysis ?? { path: p, error: 'Not analyzed yet' }));
+      list.appendChild(detailsRow);
+    }
   }
 }
 
@@ -483,6 +685,11 @@ async function analyzeAllFolders() {
     const analyzed = typeof data.analyzed === 'number' ? data.analyzed : 0;
     const errors = typeof data.errors === 'number' ? data.errors : 0;
     setStatus(`Analyze-all complete: ${analyzed} analyzed, ${errors} errors.`, false);
+
+    // Refresh dashboard/details from DB for current selection (if any).
+    if (selected.size > 0) {
+      await loadSelectedFromDb();
+    }
   } catch (e) {
     setStatus(e.message, false);
     throw e;
@@ -616,6 +823,7 @@ function renderBrowse(data) {
     btn.onclick = () => {
       if (selected.has(p)) selected.delete(p);
       else selected.add(p);
+      saveSelectionToStorage();
       renderSelected();
       browse(currentPath); // refresh button labels
       scheduleAnalyze();
@@ -693,6 +901,7 @@ async function analyzeAllInCurrentFolder() {
     return;
   }
   selected = new Set(files.map((f) => joinPath(currentPath, f)));
+  saveSelectionToStorage();
   expanded = new Set();
   renderSelected();
   setStatus(`Analyzing ${files.length} file(s)…`, true);
@@ -804,10 +1013,17 @@ function wire() {
 }
 
 wire();
+restoreSelectionFromStorage();
+saveSelectionToStorage();
 renderSelected();
-renderDashboard(null);
+if (selected.size === 0) renderDashboard(null);
 browse('').catch((e) => {
   setStatus(`Browse failed: ${e.message}`, false);
+});
+
+// Populate dashboard from DB for restored selection (keeps values on reload).
+loadSelectedFromDb().catch(() => {
+  // If DB is disabled/unreachable, dashboard will populate after user analyzes.
 });
 
 loadSearchOptions()
