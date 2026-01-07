@@ -24,6 +24,34 @@ const searchFilters = {
 
 const el = (id) => document.getElementById(id);
 
+const STORAGE_FILE_LAYOUT_KEY = 'mediaanalyzer:fileLayout';
+let fileLayout = 'list'; // 'list' | 'grid'
+
+function loadFileLayoutFromStorage() {
+  try {
+    const v = localStorage.getItem(STORAGE_FILE_LAYOUT_KEY);
+    if (v === 'grid' || v === 'list') fileLayout = v;
+  } catch {
+    // ignore
+  }
+}
+
+function saveFileLayoutToStorage() {
+  try {
+    localStorage.setItem(STORAGE_FILE_LAYOUT_KEY, fileLayout);
+  } catch {
+    // ignore
+  }
+}
+
+function applyFileLayoutUi() {
+  const list = el('fileList');
+  if (list) list.classList.toggle('grid', fileLayout === 'grid');
+
+  const btn = el('btnToggleFileLayout');
+  if (btn) btn.textContent = fileLayout === 'grid' ? 'List view' : 'Grid view';
+}
+
 function saveSelectionToStorage() {
   try {
     const items = Array.from(selected.values()).filter((p) => typeof p === 'string' && p.trim());
@@ -92,6 +120,88 @@ function requestFullscreenSafe(targetEl) {
   });
 }
 
+let aframeLoadPromise = null;
+function ensureAframeLoaded() {
+  if (window.AFRAME) return Promise.resolve();
+  if (aframeLoadPromise) return aframeLoadPromise;
+
+  aframeLoadPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-aframe="1"]');
+    if (existing && window.AFRAME) return resolve();
+
+    const s = document.createElement('script');
+    s.src = '/vendor/aframe-master.min.js';
+    s.async = true;
+    s.dataset.aframe = '1';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load VR viewer (A-Frame).'));
+    document.head.appendChild(s);
+  });
+
+  return aframeLoadPromise;
+}
+
+function createVrViewer(pathValue) {
+  const root = document.createElement('div');
+  root.className = 'vrViewer';
+
+  const vid = document.createElement('video');
+  const id = `vrvid_${Math.random().toString(36).slice(2)}`;
+  vid.id = id;
+  vid.src = mediaUrl(pathValue);
+  vid.preload = 'metadata';
+  vid.crossOrigin = 'anonymous';
+  vid.playsInline = true;
+  vid.setAttribute('webkit-playsinline', '');
+  vid.style.display = 'none';
+
+  const scene = document.createElement('a-scene');
+  scene.setAttribute('embedded', '');
+  scene.setAttribute('vr-mode-ui', 'enabled: true');
+  scene.setAttribute('renderer', 'antialias: true; colorManagement: true');
+  scene.className = 'vrScene';
+  scene.style.cursor = 'pointer';
+  scene.title = 'Click to fullscreen';
+  scene.addEventListener('click', () => requestFullscreenSafe(root));
+
+  const assets = document.createElement('a-assets');
+  assets.appendChild(vid);
+
+  const sphere = document.createElement('a-videosphere');
+  sphere.setAttribute('src', `#${id}`);
+  sphere.setAttribute('rotation', '0 -90 0');
+
+  const cam = document.createElement('a-entity');
+  cam.setAttribute('camera', '');
+  cam.setAttribute('look-controls', '');
+  cam.setAttribute('position', '0 0 0');
+
+  scene.appendChild(assets);
+  scene.appendChild(sphere);
+  scene.appendChild(cam);
+
+  const actions = document.createElement('div');
+  actions.className = 'previewActions';
+
+  const playBtn = document.createElement('button');
+  playBtn.className = 'btn';
+  playBtn.textContent = 'Play/Pause';
+  playBtn.onclick = () => {
+    if (vid.paused) {
+      vid.play().catch(() => setStatus('Click again to start playback.', false));
+    } else {
+      vid.pause();
+    }
+  };
+
+  actions.appendChild(playBtn);
+
+  root.appendChild(scene);
+  root.appendChild(actions);
+
+  return { root, videoEl: vid };
+}
+
 function renderThumb(relPath, kindHint = '') {
   const kind = kindHint || guessKindFromPath(relPath);
   if (kind === 'image' || kind === 'video') {
@@ -149,6 +259,9 @@ function renderMediaPreview(analysisOrPath) {
       img.decoding = 'async';
       img.alt = baseNameFromPath(pathValue);
       img.src = mediaUrl(pathValue);
+      img.style.cursor = 'pointer';
+      img.title = 'Click to fullscreen';
+      img.onclick = () => requestFullscreenSafe(img);
       return img;
     }
     return null;
@@ -157,16 +270,44 @@ function renderMediaPreview(analysisOrPath) {
   if (!media) return null;
   preview.appendChild(media);
 
-  if (kind === 'image' || kind === 'video') {
+  if (kind === 'video') {
     const actions = document.createElement('div');
     actions.className = 'previewActions';
 
-    const fsBtn = document.createElement('button');
-    fsBtn.className = 'btn';
-    fsBtn.textContent = 'Fullscreen';
-    fsBtn.onclick = () => requestFullscreenSafe(media);
+    if (kind === 'video') {
+      const vrBtn = document.createElement('button');
+      vrBtn.className = 'btn';
+      vrBtn.textContent = 'VR';
 
-    actions.appendChild(fsBtn);
+      let vr = null;
+      let vrOn = false;
+      vrBtn.onclick = async () => {
+        try {
+          if (!vrOn) {
+            setStatus('Loading VR viewer…', true);
+            await ensureAframeLoaded();
+            if (typeof media.pause === 'function') media.pause();
+            vr = createVrViewer(pathValue);
+            preview.replaceChild(vr.root, media);
+            vrBtn.textContent = 'Normal';
+            vrOn = true;
+            setStatus('', false);
+          } else {
+            if (vr?.videoEl && typeof vr.videoEl.pause === 'function') vr.videoEl.pause();
+            preview.replaceChild(media, vr.root);
+            vrBtn.textContent = 'VR';
+            vrOn = false;
+          }
+        } catch (e) {
+          setStatus(e?.message || 'Failed to start VR viewer.', false);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      actions.appendChild(vrBtn);
+    }
+
     preview.appendChild(actions);
   }
 
@@ -746,6 +887,15 @@ async function loadSelectedFromDb() {
   }
 }
 
+async function loadDashboardFromDb() {
+  const scope = 'all';
+  const q = `scope=${encodeURIComponent(scope)}&basePath=${encodeURIComponent(currentPath ?? '')}`;
+  const resp = await fetch(`/api/db/dashboard?${q}`);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'DB dashboard load failed');
+  renderDashboard(data.dashboard);
+}
+
 function renderBrowse(data) {
   currentPath = data.path ?? '';
   el('currentPath').textContent = '/' + currentPath;
@@ -773,12 +923,76 @@ function renderBrowse(data) {
 
   for (const f of data.files ?? []) {
     const li = document.createElement('li');
+    const p = joinPath(currentPath, f);
+
+    if (fileLayout === 'grid') {
+      li.className = 'gridItem';
+
+      const kind = guessKindFromPath(p);
+      const media = (() => {
+        if (kind === 'image') {
+          const img = document.createElement('img');
+          img.className = 'gridMedia';
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          img.alt = f;
+          img.src = mediaUrl(p);
+          img.style.cursor = 'pointer';
+          img.title = 'Click to fullscreen';
+          img.onclick = () => requestFullscreenSafe(img);
+          return img;
+        }
+        if (kind === 'video') {
+          const v = document.createElement('video');
+          v.className = 'gridMedia';
+          v.controls = true;
+          v.preload = 'metadata';
+          v.playsInline = true;
+          v.src = mediaUrl(p);
+          return v;
+        }
+        if (kind === 'audio') {
+          const a = document.createElement('audio');
+          a.className = 'gridMedia';
+          a.controls = true;
+          a.preload = 'metadata';
+          a.src = mediaUrl(p);
+          return a;
+        }
+        const ph = document.createElement('div');
+        ph.className = 'gridPlaceholder';
+        ph.textContent = kind ? kind.toUpperCase() : 'FILE';
+        return ph;
+      })();
+
+      li.appendChild(media);
+
+      const title = document.createElement('div');
+      title.className = 'gridTitle';
+      title.textContent = f;
+      li.appendChild(title);
+
+      const btn = document.createElement('button');
+      btn.className = selected.has(p) ? 'btn' : 'btn primary';
+      btn.textContent = selected.has(p) ? 'Selected' : 'Select';
+      btn.onclick = () => {
+        if (selected.has(p)) selected.delete(p);
+        else selected.add(p);
+        saveSelectionToStorage();
+        renderSelected();
+        browse(currentPath);
+        scheduleAnalyze();
+      };
+
+      li.appendChild(btn);
+      fileList.appendChild(li);
+      continue;
+    }
+
     const name = document.createElement('span');
     name.className = 'itemName';
     name.textContent = f;
     li.appendChild(name);
-
-    const p = joinPath(currentPath, f);
 
     const btnDetails = document.createElement('button');
     btnDetails.className = 'btn';
@@ -961,6 +1175,16 @@ function wire() {
     btnAnalyzeAllGlobal.onclick = () => analyzeAllFolders().catch((e) => setStatus(e.message));
   }
 
+  const btnToggleLayout = el('btnToggleFileLayout');
+  if (btnToggleLayout) {
+    btnToggleLayout.onclick = () => {
+      fileLayout = fileLayout === 'grid' ? 'list' : 'grid';
+      saveFileLayoutToStorage();
+      applyFileLayoutUi();
+      browse(currentPath).catch((e) => setStatus(e.message, false));
+    };
+  }
+
   const bindSearch = (id, key) => {
     const node = el(id);
     if (!node) return;
@@ -1013,6 +1237,8 @@ function wire() {
 }
 
 wire();
+loadFileLayoutFromStorage();
+applyFileLayoutUi();
 restoreSelectionFromStorage();
 saveSelectionToStorage();
 renderSelected();
@@ -1025,6 +1251,13 @@ browse('').catch((e) => {
 loadSelectedFromDb().catch(() => {
   // If DB is disabled/unreachable, dashboard will populate after user analyzes.
 });
+
+// If nothing is selected, show overall DB dashboard instead of an empty dashboard.
+if (selected.size === 0) {
+  loadDashboardFromDb().catch(() => {
+    // ignore
+  });
+}
 
 loadSearchOptions()
   .then(() => {

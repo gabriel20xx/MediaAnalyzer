@@ -213,3 +213,116 @@ export async function searchAnalyses(pool, filters, scopePrefix) {
   const { rows } = await pool.query(sql, params);
   return rows.map((r) => r.data);
 }
+
+function escapeLikePrefix(prefix) {
+  return prefix.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+export async function getDashboardFromDb(pool, scopePrefix = '') {
+  if (!pool) {
+    return {
+      totals: {
+        selectedCount: 0,
+        analyzedOkCount: 0,
+        analyzedErrorCount: 0,
+        totalSizeBytes: 0,
+        totalDurationSec: 0,
+        bitRate: { min: null, max: null },
+        durationSec: { min: null, max: null }
+      },
+      counts: {
+        kind: [],
+        containerFormat: [],
+        videoCodec: [],
+        audioCodec: [],
+        resolution: []
+      }
+    };
+  }
+
+  const prefix = typeof scopePrefix === 'string' ? scopePrefix.trim() : '';
+  const where = prefix ? "WHERE path LIKE $1 ESCAPE E'\\\\'" : '';
+  const params = prefix ? [`${escapeLikePrefix(prefix)}%`] : [];
+
+  const q = async (sql) => {
+    const { rows } = await pool.query(sql, params);
+    return rows;
+  };
+
+  const totalsSql = `
+    SELECT
+      COUNT(*) AS total_count,
+      SUM(CASE WHEN (data ? 'error') THEN 1 ELSE 0 END) AS error_count,
+      SUM(CASE WHEN NOT (data ? 'error') THEN 1 ELSE 0 END) AS ok_count,
+      COALESCE(SUM(CASE WHEN NOT (data ? 'error') THEN size_bytes ELSE 0 END), 0) AS total_size_bytes,
+      COALESCE(SUM(CASE WHEN NOT (data ? 'error') THEN duration_sec ELSE 0 END), 0) AS total_duration_sec,
+      MIN(CASE WHEN NOT (data ? 'error') THEN bit_rate ELSE NULL END) AS bit_rate_min,
+      MAX(CASE WHEN NOT (data ? 'error') THEN bit_rate ELSE NULL END) AS bit_rate_max,
+      MIN(CASE WHEN NOT (data ? 'error') THEN duration_sec ELSE NULL END) AS duration_min,
+      MAX(CASE WHEN NOT (data ? 'error') THEN duration_sec ELSE NULL END) AS duration_max
+    FROM media_analysis
+    ${where};
+  `;
+
+  const groupSql = (col, alias) => `
+    SELECT ${col} AS key, COUNT(*)::int AS count
+    FROM media_analysis
+    ${where ? `${where} AND NOT (data ? 'error')` : 'WHERE NOT (data ? \'error\')'}
+    AND ${col} IS NOT NULL
+    GROUP BY ${col}
+    ORDER BY count DESC, key ASC;
+  `;
+
+  const resolutionSql = `
+    SELECT (width::text || 'x' || height::text) AS key, COUNT(*)::int AS count
+    FROM media_analysis
+    ${where ? `${where} AND NOT (data ? 'error')` : 'WHERE NOT (data ? \'error\')'}
+    AND width IS NOT NULL AND height IS NOT NULL
+    GROUP BY width, height
+    ORDER BY count DESC, key ASC;
+  `;
+
+  const [totalsRows, kindRows, containerRows, vcodecRows, acodecRows, resRows] = await Promise.all([
+    q(totalsSql),
+    q(groupSql('kind', 'kind')),
+    q(groupSql('container_format', 'containerFormat')),
+    q(groupSql('video_codec', 'videoCodec')),
+    q(groupSql('audio_codec', 'audioCodec')),
+    q(resolutionSql)
+  ]);
+
+  const t = totalsRows?.[0] ?? {};
+  const toInt = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const toNumOrNull = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  return {
+    totals: {
+      selectedCount: 0,
+      analyzedOkCount: toInt(t.ok_count),
+      analyzedErrorCount: toInt(t.error_count),
+      totalSizeBytes: toInt(t.total_size_bytes),
+      totalDurationSec: toNumOrNull(t.total_duration_sec) ?? 0,
+      bitRate: {
+        min: toNumOrNull(t.bit_rate_min),
+        max: toNumOrNull(t.bit_rate_max)
+      },
+      durationSec: {
+        min: toNumOrNull(t.duration_min),
+        max: toNumOrNull(t.duration_max)
+      }
+    },
+    counts: {
+      kind: kindRows.map((r) => ({ key: r.key, count: r.count })),
+      containerFormat: containerRows.map((r) => ({ key: r.key, count: r.count })),
+      videoCodec: vcodecRows.map((r) => ({ key: r.key, count: r.count })),
+      audioCodec: acodecRows.map((r) => ({ key: r.key, count: r.count })),
+      resolution: resRows.map((r) => ({ key: r.key, count: r.count }))
+    }
+  };
+}

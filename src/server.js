@@ -7,7 +7,7 @@ import { browsePath, resolveWithinRoot } from './fsBrowse.js';
 import { analyzeFiles } from './analyze.js';
 import { compareAnalyses } from './compare.js';
 import { buildDashboard } from './dashboard.js';
-import { createPool, ensureSchema, upsertAnalyses, isDbEnabled, getAnalysesByPaths, getSearchOptions, searchAnalyses } from './db.js';
+import { createPool, ensureSchema, upsertAnalyses, isDbEnabled, getAnalysesByPaths, getSearchOptions, searchAnalyses, getDashboardFromDb } from './db.js';
 import chokidar from 'chokidar';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,6 +16,13 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Frontend vendor assets (served from node_modules). Used for VR/360 video playback.
+app.use('/vendor', express.static(path.join(__dirname, '../node_modules/aframe/dist'), {
+  fallthrough: true,
+  etag: true,
+  maxAge: '1h'
+}));
 
 const port = Number(process.env.PORT ?? 3000);
 const mediaRoot = process.env.MEDIA_ROOT ?? '/media';
@@ -264,6 +271,28 @@ app.post('/api/db/analyses', async (req, res) => {
     res.json({ results, dashboard });
   } catch (err) {
     res.status(400).json({ error: err?.message ?? 'Bad request' });
+  }
+});
+
+app.get('/api/db/dashboard', async (req, res) => {
+  try {
+    if (!dbPool) {
+      return res.status(400).json({ error: 'DATABASE_URL not set (DB disabled)' });
+    }
+
+    const scope = typeof req.query.scope === 'string' ? req.query.scope : 'all';
+    const basePath = typeof req.query.basePath === 'string' ? req.query.basePath : '';
+
+    const scopePrefix = (() => {
+      if (scope !== 'current') return '';
+      const resolved = resolveWithinRoot(mediaRoot, basePath || '');
+      return resolved.relative ? `${resolved.relative}/` : '';
+    })();
+
+    const dashboard = await getDashboardFromDb(dbPool, scopePrefix);
+    res.json({ dashboard });
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? 'Failed to load DB dashboard' });
   }
 });
 
