@@ -19,6 +19,23 @@ const searchFilters = {
 
 const el = (id) => document.getElementById(id);
 
+function setActiveTab(tabName) {
+  const allPanels = Array.from(document.querySelectorAll('.tabPanel'));
+  for (const p of allPanels) {
+    p.classList.toggle('active', p.dataset.tab === tabName);
+  }
+
+  const byId = {
+    dashboard: 'tabDashboard',
+    search: 'tabSearch',
+    browser: 'tabBrowser'
+  };
+  for (const [name, id] of Object.entries(byId)) {
+    const b = el(id);
+    if (b) b.classList.toggle('active', name === tabName);
+  }
+}
+
 const STORAGE_FILE_LAYOUT_KEY = 'mediaanalyzer:fileLayout';
 let fileLayout = 'list'; // 'list' | 'grid'
 
@@ -999,6 +1016,13 @@ async function compare() {
 }
 
 function wire() {
+  const tabDashboard = el('tabDashboard');
+  const tabSearch = el('tabSearch');
+  const tabBrowser = el('tabBrowser');
+  if (tabDashboard) tabDashboard.onclick = () => setActiveTab('dashboard');
+  if (tabSearch) tabSearch.onclick = () => setActiveTab('search');
+  if (tabBrowser) tabBrowser.onclick = () => setActiveTab('browser');
+
   el('btnRefresh').onclick = () => browse(currentPath);
   el('btnUp').onclick = () => browse(parentPath(currentPath));
   const btnCompare = el('btnCompare');
@@ -1076,6 +1100,7 @@ function wire() {
 }
 
 wire();
+setActiveTab('dashboard');
 loadFileLayoutFromStorage();
 applyFileLayoutUi();
 browse('').catch((e) => {

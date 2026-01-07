@@ -11,6 +11,12 @@
       <div class="container">
         <h1>MediaAnalyzer</h1>
         <div class="muted">Browse a folder and analyze media files.</div>
+
+        <div class="tabs" style="margin-top: 12px;">
+          <button id="tabDashboard" class="tabBtn active" type="button">Dashboard</button>
+          <button id="tabSearch" class="tabBtn" type="button">Search</button>
+          <button id="tabBrowser" class="tabBtn" type="button">Browser</button>
+        </div>
       </div>
     </header>
 
@@ -22,7 +28,7 @@
     </div>
 
     <main class="container grid">
-      <section class="panel full">
+      <section class="panel full tabPanel active" data-tab="dashboard">
         <div class="row">
           <h2>Dashboard</h2>
           <div class="spacer"></div>
@@ -74,7 +80,7 @@
         </div>
       </section>
 
-      <section class="panel full">
+      <section class="panel full tabPanel" data-tab="search">
         <div class="row">
           <h2>Search</h2>
           <div class="spacer"></div>
@@ -122,7 +128,7 @@
         <div id="searchTable" class="table"></div>
       </section>
 
-      <section class="panel full">
+      <section class="panel full tabPanel" data-tab="browser">
         <div class="row">
           <h2>Browser</h2>
           <div class="spacer"></div>

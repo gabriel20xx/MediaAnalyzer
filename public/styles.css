@@ -42,6 +42,31 @@ code { color: var(--muted); }
 
 .panel {
   border: 1px solid var(--border);
+.tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tabBtn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tabBtn.active {
+  border-color: var(--borderStrong);
+  font-weight: 600;
+}
+.tabPanel {
+  display: none;
+}
+.tabPanel.active {
+  display: block;
+}
   background: var(--panel);
   border-radius: 10px;
   padding: 14px;
