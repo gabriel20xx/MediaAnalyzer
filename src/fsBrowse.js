@@ -27,6 +27,12 @@ export function resolveWithinRoot(mediaRoot, relPath) {
 export async function browsePath(mediaRoot, relPath) {
   const { targetAbs, relative } = resolveWithinRoot(mediaRoot, relPath);
 
+  const opts = arguments.length >= 3 && typeof arguments[2] === 'object' && arguments[2] ? arguments[2] : {};
+  const fileOffsetRaw = typeof opts.fileOffset === 'number' ? opts.fileOffset : 0;
+  const fileLimitRaw = typeof opts.fileLimit === 'number' ? opts.fileLimit : null;
+  const fileOffset = Number.isFinite(fileOffsetRaw) && fileOffsetRaw > 0 ? Math.floor(fileOffsetRaw) : 0;
+  const fileLimit = Number.isFinite(fileLimitRaw) && fileLimitRaw > 0 ? Math.floor(fileLimitRaw) : null;
+
   const dirEntries = await fs.readdir(targetAbs, { withFileTypes: true });
 
   const dirs = [];
@@ -48,12 +54,18 @@ export async function browsePath(mediaRoot, relPath) {
   dirs.sort((a, b) => a.localeCompare(b));
   files.sort((a, b) => a.localeCompare(b));
 
+  const totalFiles = files.length;
+  const pagedFiles = fileLimit ? files.slice(fileOffset, fileOffset + fileLimit) : files;
+
   const parent = relative === '' ? null : relative.split('/').slice(0, -1).join('/');
 
   return {
     path: relative,
     parent,
     dirs,
-    files
+    files: pagedFiles,
+    totalFiles,
+    fileOffset,
+    fileLimit: fileLimit ?? totalFiles
   };
 }

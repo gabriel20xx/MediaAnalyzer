@@ -214,6 +214,82 @@ export async function searchAnalyses(pool, filters, scopePrefix) {
   return rows.map((r) => r.data);
 }
 
+export async function searchAnalysesPaged(pool, filters, scopePrefix, { limit, offset } = {}) {
+  if (!pool) return { items: [], total: 0, limit: 0, offset: 0 };
+
+  const f = filters && typeof filters === 'object' ? filters : {};
+  const where = [];
+  const params = [];
+  let i = 1;
+
+  const addEq = (col, val) => {
+    if (!val) return;
+    where.push(`${col} = $${i}`);
+    params.push(val);
+    i++;
+  };
+
+  addEq('kind', typeof f.kind === 'string' ? f.kind : '');
+  addEq('container_format', typeof f.container === 'string' ? f.container : '');
+  addEq('video_codec', typeof f.videoCodec === 'string' ? f.videoCodec : '');
+  addEq('audio_codec', typeof f.audioCodec === 'string' ? f.audioCodec : '');
+
+  const res = typeof f.resolution === 'string' ? f.resolution : '';
+  if (res) {
+    const m = /^\s*(\d+)x(\d+)\s*$/.exec(res);
+    if (m) {
+      where.push(`width = $${i}`);
+      params.push(Number(m[1]));
+      i++;
+      where.push(`height = $${i}`);
+      params.push(Number(m[2]));
+      i++;
+    }
+  }
+
+  const name = typeof f.name === 'string' ? f.name.trim() : '';
+  if (name) {
+    where.push(`path ILIKE $${i}`);
+    params.push(`%${name}%`);
+    i++;
+  }
+
+  const prefix = typeof scopePrefix === 'string' ? scopePrefix.trim() : '';
+  if (prefix) {
+    where.push(`path LIKE $${i} ESCAPE E'\\\\'`);
+    params.push(`${escapeLikePrefix(prefix)}%`);
+    i++;
+  }
+
+  const max = Number(process.env.SEARCH_MAX_RESULTS ?? 2000);
+  const maxLimit = Number.isFinite(max) && max > 0 ? Math.floor(max) : 2000;
+  const limRaw = Number(limit);
+  const offRaw = Number(offset);
+  const safeLimit = Number.isFinite(limRaw) && limRaw > 0 ? Math.min(Math.floor(limRaw), maxLimit) : Math.min(100, maxLimit);
+  const safeOffset = Number.isFinite(offRaw) && offRaw > 0 ? Math.floor(offRaw) : 0;
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const totalSql = `
+    SELECT COUNT(*)::bigint AS c
+    FROM media_analysis
+    ${whereSql};
+  `;
+  const { rows: totalRows } = await pool.query(totalSql, params);
+  const total = Number(totalRows?.[0]?.c ?? 0);
+
+  const itemsSql = `
+    SELECT data
+    FROM media_analysis
+    ${whereSql}
+    ORDER BY path
+    LIMIT $${i} OFFSET $${i + 1};
+  `;
+  const { rows } = await pool.query(itemsSql, [...params, safeLimit, safeOffset]);
+  const items = rows.map((r) => r.data);
+  return { items, total, limit: safeLimit, offset: safeOffset };
+}
+
 function escapeLikePrefix(prefix) {
   return prefix.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }

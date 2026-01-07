@@ -7,7 +7,7 @@ import { browsePath, resolveWithinRoot } from './fsBrowse.js';
 import { analyzeFiles } from './analyze.js';
 import { compareAnalyses } from './compare.js';
 import { buildDashboard } from './dashboard.js';
-import { createPool, ensureSchema, upsertAnalyses, isDbEnabled, getAnalysesByPaths, getSearchOptions, searchAnalyses, getDashboardFromDb } from './db.js';
+import { createPool, ensureSchema, upsertAnalyses, isDbEnabled, getAnalysesByPaths, getSearchOptions, searchAnalysesPaged, getDashboardFromDb } from './db.js';
 import chokidar from 'chokidar';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -185,6 +185,13 @@ function pickSearchFilters(body) {
   };
 }
 
+function parseNonNegInt(val, fallback) {
+  const n = typeof val === 'string' ? Number(val) : Number(val);
+  if (!Number.isFinite(n)) return fallback;
+  const i = Math.floor(n);
+  return i >= 0 ? i : fallback;
+}
+
 function analysisMatchesFilters(a, filters) {
   if (!a || a.error) return false;
   if (filters.kind && a.kind !== filters.kind) return false;
@@ -214,7 +221,16 @@ app.get('/api/browse', async (req, res) => {
   try {
     const relPath = typeof req.query.path === 'string' ? req.query.path : '';
     const resolved = resolveWithinRoot(mediaRoot, relPath);
-    const listing = await browsePath(mediaRoot, resolved.relative);
+
+    // Only paginate the file list (dirs are usually small).
+    // If fileLimit is omitted, keep backward-compatible behavior: return all files.
+    const fileLimit = (typeof req.query.fileLimit === 'string') ? parseNonNegInt(req.query.fileLimit, null) : null;
+    const fileOffset = (typeof req.query.fileOffset === 'string') ? parseNonNegInt(req.query.fileOffset, 0) : 0;
+
+    const listing = await browsePath(mediaRoot, resolved.relative, {
+      fileOffset,
+      fileLimit
+    });
     res.json({ mediaRoot: '/', path: listing.path, ...listing });
   } catch (err) {
     res.status(400).json({ error: err?.message ?? 'Bad request' });
@@ -310,12 +326,20 @@ app.post('/api/search', async (req, res) => {
     const filters = pickSearchFilters(req.body);
     const nameQ = filters.name.trim().toLowerCase();
 
+    const limit = parseNonNegInt(req.body?.limit, 100);
+    const offset = parseNonNegInt(req.body?.offset, 0);
+
+    const max = Number(process.env.SEARCH_MAX_RESULTS ?? 2000);
+    const maxLimit = Number.isFinite(max) && max > 0 ? Math.floor(max) : 2000;
+    const safeLimit = Math.max(1, Math.min(limit || 100, maxLimit));
+    const safeOffset = Math.max(0, offset || 0);
+
     const needsMeta = Boolean(filters.kind || filters.container || filters.videoCodec || filters.audioCodec || filters.resolution);
 
     // Avoid returning the entire library by default (can be huge).
     // Require at least one filter (name or metadata) to perform a search.
     if (!nameQ && !needsMeta) {
-      return res.json({ results: [] });
+      return res.json({ results: [], total: 0, limit: safeLimit, offset: safeOffset });
     }
 
     const scopePrefix = (() => {
@@ -326,12 +350,14 @@ app.post('/api/search', async (req, res) => {
 
     // When metadata filters are used, search the DB directly (analyzed files only).
     if (needsMeta) {
-      if (!dbPool) return res.json({ results: [] });
-      const analyses = await searchAnalyses(dbPool, filters, scopePrefix);
-      const results = analyses
+      if (!dbPool) return res.json({ results: [], total: 0, limit: safeLimit, offset: safeOffset });
+
+      const paged = await searchAnalysesPaged(dbPool, filters, scopePrefix, { limit: safeLimit, offset: safeOffset });
+      const results = (paged.items ?? [])
         .filter((a) => a && a.path)
         .map((a) => ({ ...a, analyzed: true }));
-      return res.json({ results });
+
+      return res.json({ results, total: paged.total ?? results.length, limit: paged.limit ?? safeLimit, offset: paged.offset ?? safeOffset });
     }
 
     const allFiles = await listAllFilesRecursive(mediaRoot);
@@ -345,16 +371,22 @@ app.post('/api/search', async (req, res) => {
       candidates = candidates.filter((p) => p.toLowerCase().includes(nameQ));
     }
 
+    const total = candidates.length;
+    const page = candidates.slice(safeOffset, safeOffset + safeLimit);
+
     if (!dbPool) {
       // Without DB, we can only return name matches (no metadata filtering possible).
       return res.json({
-        results: candidates.map((p) => ({ path: p, name: path.posix.basename(p), analyzed: false }))
+        results: page.map((p) => ({ path: p, name: path.posix.basename(p), analyzed: false })),
+        total,
+        limit: safeLimit,
+        offset: safeOffset
       });
     }
 
-    // Fetch analyses for candidates in chunks to avoid oversized parameter payloads.
+    // Fetch analyses for current page in chunks to avoid oversized parameter payloads.
     const chunkSize = Number(process.env.SEARCH_DB_CHUNK_SIZE ?? 2000);
-    const chunks = chunkArray(candidates, Number.isFinite(chunkSize) && chunkSize > 0 ? chunkSize : 2000);
+    const chunks = chunkArray(page, Number.isFinite(chunkSize) && chunkSize > 0 ? chunkSize : 2000);
     const found = new Map();
     for (const c of chunks) {
       const analyses = await getAnalysesByPaths(dbPool, c);
@@ -364,7 +396,7 @@ app.post('/api/search', async (req, res) => {
     }
 
     const results = [];
-    for (const p of candidates) {
+    for (const p of page) {
       const a = found.get(p);
       if (needsMeta) {
         if (a && analysisMatchesFilters(a, filters)) {
@@ -378,7 +410,7 @@ app.post('/api/search', async (req, res) => {
       else results.push({ path: p, name: path.posix.basename(p), analyzed: false });
     }
 
-    res.json({ results });
+    res.json({ results, total, limit: safeLimit, offset: safeOffset });
   } catch (err) {
     res.status(500).json({ error: err?.message ?? 'Search failed' });
   }

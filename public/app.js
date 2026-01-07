@@ -7,6 +7,16 @@ let analysisByPath = new Map();
 let searchTimer = null;
 let searchResults = [];
 
+const SEARCH_PAGE_SIZE = 100;
+let searchTotal = 0;
+let searchLimit = SEARCH_PAGE_SIZE;
+let searchOffset = 0;
+
+const BROWSE_PAGE_SIZE = 200;
+let browseFileTotal = 0;
+let browseFileLimit = BROWSE_PAGE_SIZE;
+let browseFileOffset = 0;
+
 const searchFilters = {
   kind: '',
   container: '',
@@ -70,7 +80,7 @@ function ensureDetailsModal() {
 
 async function showDetailsModal(pathValue) {
   const m = ensureDetailsModal();
-  m.title.textContent = pathValue;
+  m.title.textContent = baseNameFromPath(pathValue) || pathValue;
   m.body.innerHTML = '<div class="muted small">Loading…</div>';
   m.overlay.style.display = 'flex';
 
@@ -92,11 +102,11 @@ async function showDetailsModal(pathValue) {
 
     const analysis = analysisByPath.get(pathValue) ?? { path: pathValue, error: 'Not analyzed yet' };
     m.body.innerHTML = '';
-    m.body.appendChild(renderAnalysisDetails(analysis));
+    m.body.appendChild(renderAnalysisDetails(analysis, { showHeader: false }));
     setStatus('');
   } catch (e) {
     m.body.innerHTML = '';
-    m.body.appendChild(renderAnalysisDetails({ path: pathValue, error: e?.message || 'Failed to load details' }));
+    m.body.appendChild(renderAnalysisDetails({ path: pathValue, error: e?.message || 'Failed to load details' }, { showHeader: false }));
     setStatus(e?.message || 'Failed to load details');
   }
 }
@@ -239,26 +249,16 @@ function createVrViewer(pathValue) {
   // Allow drag-to-look without pointer lock, and only fullscreen on a click that wasn't a drag.
   let downX = 0;
   let downY = 0;
+  let lastX = 0;
+  let lastY = 0;
   let moved = false;
-  scene.addEventListener('mousedown', (ev) => {
-    moved = false;
-    downX = ev.clientX;
-    downY = ev.clientY;
-    scene.style.cursor = 'grabbing';
-  });
-  scene.addEventListener('mousemove', (ev) => {
-    if (scene.style.cursor !== 'grabbing') return;
-    const dx = Math.abs(ev.clientX - downX);
-    const dy = Math.abs(ev.clientY - downY);
-    if (dx > 6 || dy > 6) moved = true;
-  });
-  scene.addEventListener('mouseup', () => {
-    scene.style.cursor = 'grab';
-    if (!moved) requestFullscreenSafe(root);
-  });
-  scene.addEventListener('mouseleave', () => {
-    scene.style.cursor = 'grab';
-  });
+  let dragging = false;
+
+  // Camera rotation state (degrees)
+  let yaw = 0;
+  let pitch = 0;
+  const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+  const sensitivity = 0.12;
 
   const assets = document.createElement('a-assets');
   assets.appendChild(vid);
@@ -269,9 +269,59 @@ function createVrViewer(pathValue) {
 
   const cam = document.createElement('a-entity');
   cam.setAttribute('camera', '');
-  cam.setAttribute('look-controls', 'pointerLockEnabled: false');
+  // Keep look-controls for VR/device orientation, but disable mouse/touch so we can implement drag-to-look.
+  cam.setAttribute('look-controls', 'pointerLockEnabled: false; mouseEnabled: false; touchEnabled: false');
   cam.setAttribute('wasd-controls', 'acceleration: 25');
   cam.setAttribute('position', '0 0 0');
+
+  const applyRotation = () => {
+    cam.setAttribute('rotation', `${pitch} ${yaw} 0`);
+  };
+
+  scene.addEventListener('mousedown', (ev) => {
+    // left button only
+    if (typeof ev.button === 'number' && ev.button !== 0) return;
+    moved = false;
+    dragging = true;
+    downX = ev.clientX;
+    downY = ev.clientY;
+    lastX = ev.clientX;
+    lastY = ev.clientY;
+    scene.style.cursor = 'grabbing';
+    ev.preventDefault();
+  });
+
+  scene.addEventListener('mousemove', (ev) => {
+    if (!dragging) return;
+
+    const distX = Math.abs(ev.clientX - downX);
+    const distY = Math.abs(ev.clientY - downY);
+    if (distX > 6 || distY > 6) moved = true;
+
+    const dx = ev.clientX - lastX;
+    const dy = ev.clientY - lastY;
+    lastX = ev.clientX;
+    lastY = ev.clientY;
+
+    yaw -= dx * sensitivity;
+    pitch = clamp(pitch - dy * sensitivity, -85, 85);
+    applyRotation();
+    ev.preventDefault();
+  });
+
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    scene.style.cursor = 'grab';
+    if (!moved) requestFullscreenSafe(root);
+  };
+
+  scene.addEventListener('mouseup', (ev) => {
+    ev.preventDefault();
+    endDrag();
+  });
+  scene.addEventListener('mouseleave', endDrag);
+  scene.addEventListener('blur', endDrag);
 
   scene.appendChild(assets);
   scene.appendChild(sphere);
@@ -522,6 +572,7 @@ function renderAnalysisDetails(analysis, opts = {}) {
   wrap.className = 'inlineDetails';
 
   const includePreview = opts?.includePreview !== false;
+  const showHeader = opts?.showHeader !== false;
 
   if (!analysis) {
     wrap.textContent = 'No details available.';
@@ -534,31 +585,35 @@ function renderAnalysisDetails(analysis, opts = {}) {
   }
 
   if (analysis.error) {
+    if (showHeader) {
+      const header = document.createElement('div');
+      header.className = 'detailsHeader';
+      const title = document.createElement('div');
+      title.className = 'detailsTitle';
+      title.textContent = analysis.path ?? 'File';
+      const meta = document.createElement('div');
+      meta.className = 'detailsMeta';
+      meta.textContent = `Error: ${analysis.error}`;
+      header.appendChild(title);
+      header.appendChild(meta);
+      wrap.appendChild(header);
+    }
+    return wrap;
+  }
+
+  if (showHeader) {
     const header = document.createElement('div');
     header.className = 'detailsHeader';
     const title = document.createElement('div');
     title.className = 'detailsTitle';
-    title.textContent = analysis.path ?? 'File';
+    title.textContent = analysis.name ?? analysis.path ?? 'File';
     const meta = document.createElement('div');
     meta.className = 'detailsMeta';
-    meta.textContent = `Error: ${analysis.error}`;
+    meta.textContent = `${fmt(analysis.kind)} • ${fmt(prettyBytes(analysis.sizeBytes))}`;
     header.appendChild(title);
     header.appendChild(meta);
     wrap.appendChild(header);
-    return wrap;
   }
-
-  const header = document.createElement('div');
-  header.className = 'detailsHeader';
-  const title = document.createElement('div');
-  title.className = 'detailsTitle';
-  title.textContent = analysis.name ?? analysis.path ?? 'File';
-  const meta = document.createElement('div');
-  meta.className = 'detailsMeta';
-  meta.textContent = `${fmt(analysis.kind)} • ${fmt(prettyBytes(analysis.sizeBytes))}`;
-  header.appendChild(title);
-  header.appendChild(meta);
-  wrap.appendChild(header);
 
   const sections = document.createElement('div');
   sections.className = 'detailsSections';
@@ -736,8 +791,17 @@ function renderSearchTable() {
 
   const summary = el('searchSummary');
   if (summary) {
-    summary.textContent = `${items.length} file(s)`;
+    const total = Number.isFinite(searchTotal) ? searchTotal : items.length;
+    if (total <= 0) summary.textContent = '0 file(s)';
+    else if (items.length === 0) summary.textContent = `${total} file(s)`;
+    else {
+      const start = searchOffset + 1;
+      const end = Math.min(searchOffset + items.length, total);
+      summary.textContent = `${total} file(s) (showing ${start}-${end})`;
+    }
   }
+
+  updateSearchPager();
 
   const header = document.createElement('div');
   header.className = 'tableRow tableHeader';
@@ -803,7 +867,34 @@ function renderSearchTable() {
   }
 }
 
-async function runSearch() {
+function updateSearchPager() {
+  const prev = el('btnSearchPrev');
+  const next = el('btnSearchNext');
+  const info = el('searchPageInfo');
+
+  const total = Number.isFinite(searchTotal) ? searchTotal : 0;
+  const limit = Number.isFinite(searchLimit) && searchLimit > 0 ? searchLimit : SEARCH_PAGE_SIZE;
+  const offset = Number.isFinite(searchOffset) && searchOffset >= 0 ? searchOffset : 0;
+
+  const hasPrev = offset > 0;
+  const hasNext = offset + limit < total;
+
+  if (prev) prev.disabled = !hasPrev;
+  if (next) next.disabled = !hasNext;
+
+  if (info) {
+    if (!total) info.textContent = '';
+    else {
+      const page = Math.floor(offset / limit) + 1;
+      const pages = Math.max(1, Math.ceil(total / limit));
+      info.textContent = `Page ${page} / ${pages}`;
+    }
+  }
+}
+
+async function runSearchPage(newOffset = 0) {
+  const offset = Number.isFinite(newOffset) && newOffset >= 0 ? Math.floor(newOffset) : 0;
+
   const body = {
     kind: searchFilters.kind,
     container: searchFilters.container,
@@ -812,8 +903,11 @@ async function runSearch() {
     resolution: searchFilters.resolution,
     name: searchFilters.name,
     scope: searchFilters.scope,
-    basePath: currentPath
+    basePath: currentPath,
+    limit: searchLimit,
+    offset
   };
+
   const resp = await fetch('/api/search', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -821,7 +915,12 @@ async function runSearch() {
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || 'Search failed');
+
   searchResults = Array.isArray(data.results) ? data.results : [];
+  searchTotal = Number.isFinite(Number(data.total)) ? Number(data.total) : searchResults.length;
+  searchLimit = Number.isFinite(Number(data.limit)) ? Number(data.limit) : searchLimit;
+  searchOffset = Number.isFinite(Number(data.offset)) ? Number(data.offset) : offset;
+
   // Keep cache updated so details can use DB data.
   for (const r of searchResults) {
     if (r && r.path && r.analyzed && !r.error) analysisByPath.set(r.path, r);
@@ -829,10 +928,14 @@ async function runSearch() {
   renderSearchTable();
 }
 
-function scheduleSearch() {
+function scheduleSearch({ resetPage = true } = {}) {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
-    runSearch().catch((e) => {
+    if (resetPage) {
+      searchOffset = 0;
+      expanded = new Set();
+    }
+    runSearchPage(searchOffset).catch((e) => {
       const summary = el('searchSummary');
       if (summary) summary.textContent = e.message;
     });
@@ -898,6 +1001,12 @@ async function loadDashboardFromDb() {
 function renderBrowse(data) {
   currentPath = data.path ?? '';
   el('currentPath').textContent = '/' + currentPath;
+
+  browseFileTotal = Number.isFinite(Number(data.totalFiles)) ? Number(data.totalFiles) : (Array.isArray(data.files) ? data.files.length : 0);
+  browseFileLimit = Number.isFinite(Number(data.fileLimit)) ? Number(data.fileLimit) : browseFileLimit;
+  browseFileOffset = Number.isFinite(Number(data.fileOffset)) ? Number(data.fileOffset) : browseFileOffset;
+
+  updateBrowsePager();
 
   const dirList = el('dirList');
   const fileList = el('fileList');
@@ -1000,10 +1109,36 @@ function renderBrowse(data) {
   }
 }
 
-async function browse(pathRel) {
+function updateBrowsePager() {
+  const prev = el('btnFilesPrev');
+  const next = el('btnFilesNext');
+  const info = el('filesPageInfo');
+
+  const total = Number.isFinite(browseFileTotal) ? browseFileTotal : 0;
+  const limit = Number.isFinite(browseFileLimit) && browseFileLimit > 0 ? browseFileLimit : BROWSE_PAGE_SIZE;
+  const offset = Number.isFinite(browseFileOffset) && browseFileOffset >= 0 ? browseFileOffset : 0;
+
+  const hasPrev = offset > 0;
+  const hasNext = offset + limit < total;
+
+  if (prev) prev.disabled = !hasPrev;
+  if (next) next.disabled = !hasNext;
+
+  if (info) {
+    if (!total) info.textContent = '';
+    else {
+      const start = offset + 1;
+      const end = Math.min(offset + Math.max(0, (el('fileList')?.children?.length ?? 0)), total);
+      info.textContent = `${start}-${end} of ${total}`;
+    }
+  }
+}
+
+async function browse(pathRel, { keepOffset = false, fileOffset = 0 } = {}) {
   setStatus('Loading directory…', true);
+  if (!keepOffset) browseFileOffset = Number.isFinite(Number(fileOffset)) && Number(fileOffset) >= 0 ? Math.floor(Number(fileOffset)) : 0;
   const q = encodeURIComponent(pathRel ?? '');
-  const resp = await fetch(`/api/browse?path=${q}`);
+  const resp = await fetch(`/api/browse?path=${q}&fileOffset=${encodeURIComponent(String(browseFileOffset))}&fileLimit=${encodeURIComponent(String(browseFileLimit))}`);
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || 'Browse failed');
   renderBrowse(data);
@@ -1078,10 +1213,10 @@ function wire() {
   if (tabBrowser) tabBrowser.onclick = () => setActiveTab('browser');
 
   const btnRefresh = el('btnRefresh');
-  if (btnRefresh) btnRefresh.onclick = () => browse(currentPath);
+  if (btnRefresh) btnRefresh.onclick = () => browse(currentPath, { keepOffset: true });
 
   const btnUp = el('btnUp');
-  if (btnUp) btnUp.onclick = () => browse(parentPath(currentPath));
+  if (btnUp) btnUp.onclick = () => browse(parentPath(currentPath), { keepOffset: false, fileOffset: 0 });
   const btnCompare = el('btnCompare');
   if (btnCompare) btnCompare.onclick = () => compare().catch((e) => setStatus(e.message));
 
@@ -1101,7 +1236,23 @@ function wire() {
       fileLayout = fileLayout === 'grid' ? 'list' : 'grid';
       saveFileLayoutToStorage();
       applyFileLayoutUi();
-      browse(currentPath).catch((e) => setStatus(e.message, false));
+      browse(currentPath, { keepOffset: true }).catch((e) => setStatus(e.message, false));
+    };
+  }
+
+  const btnFilesPrev = el('btnFilesPrev');
+  if (btnFilesPrev) {
+    btnFilesPrev.onclick = () => {
+      const nextOffset = Math.max(0, browseFileOffset - browseFileLimit);
+      browse(currentPath, { keepOffset: false, fileOffset: nextOffset }).catch((e) => setStatus(e.message, false));
+    };
+  }
+
+  const btnFilesNext = el('btnFilesNext');
+  if (btnFilesNext) {
+    btnFilesNext.onclick = () => {
+      const nextOffset = Math.max(0, browseFileOffset + browseFileLimit);
+      browse(currentPath, { keepOffset: false, fileOffset: nextOffset }).catch((e) => setStatus(e.message, false));
     };
   }
 
@@ -1110,7 +1261,7 @@ function wire() {
     if (!node) return;
     const on = () => {
       searchFilters[key] = node.value ?? '';
-      scheduleSearch();
+      scheduleSearch({ resetPage: true });
     };
     node.addEventListener('input', on);
     node.addEventListener('change', on);
@@ -1128,8 +1279,30 @@ function wire() {
     scopeNode.value = 'all';
     scopeNode.addEventListener('change', () => {
       searchFilters.scope = scopeNode.value ?? 'all';
-      scheduleSearch();
+      scheduleSearch({ resetPage: true });
     });
+  }
+
+  const btnSearchPrev = el('btnSearchPrev');
+  if (btnSearchPrev) {
+    btnSearchPrev.onclick = () => {
+      const nextOffset = Math.max(0, searchOffset - searchLimit);
+      runSearchPage(nextOffset).catch((e) => {
+        const summary = el('searchSummary');
+        if (summary) summary.textContent = e.message;
+      });
+    };
+  }
+
+  const btnSearchNext = el('btnSearchNext');
+  if (btnSearchNext) {
+    btnSearchNext.onclick = () => {
+      const nextOffset = Math.max(0, searchOffset + searchLimit);
+      runSearchPage(nextOffset).catch((e) => {
+        const summary = el('searchSummary');
+        if (summary) summary.textContent = e.message;
+      });
+    };
   }
 
   const clear = el('btnClearSearch');
@@ -1151,7 +1324,7 @@ function wire() {
 
       const s = el('searchScope');
       if (s) s.value = 'all';
-      scheduleSearch();
+      scheduleSearch({ resetPage: true });
     };
   }
 }

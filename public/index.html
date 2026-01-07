@@ -125,6 +125,13 @@
 
         <div class="label" style="margin-top: 10px;">Results</div>
         <div id="searchTable" class="table"></div>
+
+        <div class="row gap pager">
+          <button id="btnSearchPrev" class="btn" type="button">Prev</button>
+          <button id="btnSearchNext" class="btn" type="button">Next</button>
+          <div class="spacer"></div>
+          <div id="searchPageInfo" class="muted small"></div>
+        </div>
       </section>
 
       <section class="panel full tabPanel" data-tab="browser">
@@ -151,6 +158,13 @@
           <div>
             <div class="label">Files</div>
             <ul id="fileList" class="list"></ul>
+
+            <div class="row gap pager">
+              <button id="btnFilesPrev" class="btn" type="button">Prev</button>
+              <button id="btnFilesNext" class="btn" type="button">Next</button>
+              <div class="spacer"></div>
+              <div id="filesPageInfo" class="muted small"></div>
+            </div>
           </div>
         </div>
       </section>
