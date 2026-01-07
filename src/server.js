@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { browsePath, resolveWithinRoot } from './fsBrowse.js';
 import { analyzeFiles } from './analyze.js';
 import { compareAnalyses } from './compare.js';
+import { buildDashboard } from './dashboard.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -43,7 +44,8 @@ app.post('/api/analyze', async (req, res) => {
     });
 
     const results = await analyzeFiles(mediaRoot, normalized);
-    res.json({ results });
+    const dashboard = buildDashboard(results);
+    res.json({ results, dashboard });
   } catch (err) {
     res.status(400).json({ error: err?.message ?? 'Bad request' });
   }

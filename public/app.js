@@ -1,6 +1,10 @@
 let currentPath = '';
 let selected = new Set();
 let lastAnalyses = [];
+let lastDashboard = null;
+let analyzeTimer = null;
+let expanded = new Set();
+let analysisByPath = new Map();
 
 const el = (id) => document.getElementById(id);
 
@@ -34,6 +38,11 @@ function setStatus(msg) {
   el('status').textContent = msg;
 }
 
+function renderDashboard(dashboard) {
+  lastDashboard = dashboard ?? null;
+  el('dashboard').textContent = JSON.stringify(lastDashboard ?? {}, null, 2);
+}
+
 function renderSelected() {
   const list = el('selectedList');
   list.innerHTML = '';
@@ -41,7 +50,10 @@ function renderSelected() {
   const items = Array.from(selected.values()).sort((a, b) => a.localeCompare(b));
   for (const p of items) {
     const li = document.createElement('li');
-    li.textContent = p;
+    const name = document.createElement('span');
+    name.className = 'itemName';
+    name.textContent = p;
+    li.appendChild(name);
 
     const btn = document.createElement('button');
     btn.className = 'btn';
@@ -49,11 +61,28 @@ function renderSelected() {
     btn.onclick = () => {
       selected.delete(p);
       renderSelected();
+      scheduleAnalyze();
     };
 
     li.appendChild(btn);
     list.appendChild(li);
   }
+}
+
+async function analyzeOne(filePath) {
+  const resp = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ files: [filePath] })
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Analyze failed');
+
+  const result = Array.isArray(data.results) ? data.results[0] : null;
+  if (result && result.path) {
+    analysisByPath.set(result.path, result);
+  }
+  return result;
 }
 
 function renderBrowse(data) {
@@ -67,7 +96,10 @@ function renderBrowse(data) {
 
   for (const d of data.dirs ?? []) {
     const li = document.createElement('li');
-    li.textContent = d;
+    const name = document.createElement('span');
+    name.className = 'itemName';
+    name.textContent = d;
+    li.appendChild(name);
 
     const btn = document.createElement('button');
     btn.className = 'btn';
@@ -80,21 +112,58 @@ function renderBrowse(data) {
 
   for (const f of data.files ?? []) {
     const li = document.createElement('li');
-    li.textContent = f;
+    const name = document.createElement('span');
+    name.className = 'itemName';
+    name.textContent = f;
+    li.appendChild(name);
+
+    const p = joinPath(currentPath, f);
+
+    const btnDetails = document.createElement('button');
+    btnDetails.className = 'btn';
+    btnDetails.textContent = expanded.has(p) ? 'Hide' : 'Details';
+    btnDetails.onclick = async () => {
+      if (expanded.has(p)) {
+        expanded.delete(p);
+        browse(currentPath);
+        return;
+      }
+
+      expanded.add(p);
+      setStatus('Analyzing file…');
+      try {
+        if (!analysisByPath.has(p)) {
+          await analyzeOne(p);
+        }
+        setStatus('');
+      } catch (e) {
+        setStatus(e.message);
+      }
+      browse(currentPath);
+    };
 
     const btn = document.createElement('button');
     btn.className = 'btn primary';
-    btn.textContent = selected.has(joinPath(currentPath, f)) ? 'Selected' : 'Select';
+    btn.textContent = selected.has(p) ? 'Selected' : 'Select';
     btn.onclick = () => {
-      const p = joinPath(currentPath, f);
       if (selected.has(p)) selected.delete(p);
       else selected.add(p);
       renderSelected();
       browse(currentPath); // refresh button labels
+      scheduleAnalyze();
     };
 
+    li.appendChild(btnDetails);
     li.appendChild(btn);
     fileList.appendChild(li);
+
+    if (expanded.has(p)) {
+      const details = document.createElement('pre');
+      details.className = 'inlineDetails';
+      const analysis = analysisByPath.get(p);
+      details.textContent = JSON.stringify(analysis ?? { path: p, status: 'Not analyzed yet' }, null, 2);
+      fileList.appendChild(details);
+    }
   }
 }
 
@@ -126,6 +195,12 @@ async function analyzeSelected() {
   if (!resp.ok) throw new Error(data.error || 'Analyze failed');
 
   lastAnalyses = data.results ?? [];
+  analysisByPath = new Map(
+    lastAnalyses
+      .filter((a) => a && a.path)
+      .map((a) => [a.path, a])
+  );
+  renderDashboard(data.dashboard);
 
   // show a compact view plus raw
   const compact = lastAnalyses.map((a) => {
@@ -145,6 +220,15 @@ async function analyzeSelected() {
 
   el('output').textContent = JSON.stringify({ compact, raw: lastAnalyses }, null, 2);
   setStatus('Analyze complete.');
+}
+
+function scheduleAnalyze() {
+  if (analyzeTimer) {
+    clearTimeout(analyzeTimer);
+  }
+  analyzeTimer = setTimeout(() => {
+    analyzeSelected().catch((e) => setStatus(e.message));
+  }, 450);
 }
 
 async function compare() {
@@ -181,6 +265,7 @@ function wire() {
 }
 
 wire();
+renderDashboard(null);
 browse('').catch((e) => {
   setStatus(`Browse failed: ${e.message}`);
 });

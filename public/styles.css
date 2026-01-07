@@ -75,8 +75,9 @@ h2 { font-size: 16px; }
   margin: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
-  overflow: hidden;
+  overflow: auto;
   min-height: 220px;
+  max-height: 45vh;
 }
 
 .list li {
@@ -85,12 +86,32 @@ h2 { font-size: 16px; }
   gap: 10px;
   padding: 10px 10px;
   border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 
 .list li:last-child { border-bottom: 0; }
 
 .list li button {
   margin-left: auto;
+}
+
+.itemName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inlineDetails {
+  margin: 8px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: #0a0e16;
+  overflow: auto;
+  max-height: 220px;
+  width: 100%;
 }
 
 .path {
