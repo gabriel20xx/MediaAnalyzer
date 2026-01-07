@@ -109,10 +109,21 @@ code { color: var(--muted); }
   min-height: 0;
 }
 
-.tabPanel.active[data-tab="browser"] .list {
-  max-height: none;
-  height: 100%;
+.tabPanel.active[data-tab="browser"] .columns > div {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+}
+
+.tabPanel.active[data-tab="browser"] .columns .list {
+  flex: 1;
+  max-height: none;
+  height: auto;
+  min-height: 0;
+}
+
+.tabPanel.active[data-tab="browser"] .columns .pager {
+  flex: 0 0 auto;
 }
 
 .modalOverlay {

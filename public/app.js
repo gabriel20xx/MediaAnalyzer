@@ -225,6 +225,85 @@ function ensureAframeLoaded() {
 }
 
 function createVrViewer(pathValue) {
+  // Register a shader for de-warping equirectangular video into a perspective view on a plane.
+  // This enables a true “flat view” (not just a flat screen) without preprocessing.
+  if (window.AFRAME && !window.__maEquirectVideoShaderRegistered) {
+    window.__maEquirectVideoShaderRegistered = true;
+
+    // A-Frame expects shader definitions to be synchronous and available at entity creation time.
+    window.AFRAME.registerShader('ma-equirect-video', {
+      schema: {
+        src: { type: 'map', is: 'uniform' },
+        centerYaw: { type: 'number', is: 'uniform', default: 0 },
+        centerPitch: { type: 'number', is: 'uniform', default: 0 },
+        fov: { type: 'number', is: 'uniform', default: 90 }
+      },
+      vertexShader: `
+        varying vec2 vUV;
+        void main() {
+          vUV = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D src;
+        uniform float centerYaw;
+        uniform float centerPitch;
+        uniform float fov;
+        varying vec2 vUV;
+
+        const float PI = 3.141592653589793;
+
+        mat3 rotY(float a) {
+          float s = sin(a);
+          float c = cos(a);
+          return mat3(
+            c, 0.0, -s,
+            0.0, 1.0, 0.0,
+            s, 0.0, c
+          );
+        }
+
+        mat3 rotX(float a) {
+          float s = sin(a);
+          float c = cos(a);
+          return mat3(
+            1.0, 0.0, 0.0,
+            0.0, c, s,
+            0.0, -s, c
+          );
+        }
+
+        void main() {
+          // Convert plane UV to a camera ray for a rectilinear projection.
+          vec2 xy = (vUV * 2.0) - 1.0;
+
+          float halfFov = radians(fov) * 0.5;
+          float z = 1.0 / tan(halfFov);
+
+          // Ray direction in camera space (z forward).
+          vec3 dir = normalize(vec3(xy.x, xy.y, z));
+
+          // Apply pan/tilt (yaw around Y, pitch around X).
+          dir = rotY(radians(centerYaw)) * (rotX(radians(centerPitch)) * dir);
+
+          // Convert direction to spherical (equirectangular) UV.
+          float lon = atan(dir.x, dir.z);
+          float lat = asin(clamp(dir.y, -1.0, 1.0));
+
+          float u = lon / (2.0 * PI) + 0.5;
+          float v = 0.5 - (lat / PI);
+
+          // Wrap horizontally.
+          u = fract(u);
+
+          vec4 color = texture2D(src, vec2(u, v));
+          gl_FragColor = color;
+        }
+      `
+    });
+  }
+
   const root = document.createElement('div');
   root.className = 'vrViewer';
 
@@ -254,9 +333,12 @@ function createVrViewer(pathValue) {
   let moved = false;
   let dragging = false;
 
-  // Camera rotation state (degrees)
+  // View direction state (degrees)
+  // - In VR mode: applied to camera rotation.
+  // - In flat mode: applied to the dewarp shader uniforms.
   let yaw = 0;
   let pitch = 0;
+  let fov = 90;
   const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
   const sensitivity = 0.12;
 
@@ -267,6 +349,14 @@ function createVrViewer(pathValue) {
   sphere.setAttribute('src', `#${id}`);
   sphere.setAttribute('rotation', '0 -90 0');
 
+  // Flat view (true dewarp): render the equirectangular video through a shader onto a plane.
+  // Attach to the camera so it behaves like a normal “flat video” in view.
+  const flat = document.createElement('a-entity');
+  flat.setAttribute('visible', 'false');
+  flat.setAttribute('position', '0 0 -2');
+  flat.setAttribute('geometry', 'primitive: plane; width: 3.2; height: 1.8');
+  flat.setAttribute('material', `shader: ma-equirect-video; src: #${id}; centerYaw: 0; centerPitch: 0; fov: ${fov}`);
+
   const cam = document.createElement('a-entity');
   cam.setAttribute('camera', '');
   // Keep look-controls for VR/device orientation, but disable mouse/touch so we can implement drag-to-look.
@@ -274,8 +364,14 @@ function createVrViewer(pathValue) {
   cam.setAttribute('wasd-controls', 'acceleration: 25');
   cam.setAttribute('position', '0 0 0');
 
-  const applyRotation = () => {
-    cam.setAttribute('rotation', `${pitch} ${yaw} 0`);
+  const applyView = () => {
+    if (viewMode === 'vr') {
+      cam.setAttribute('rotation', `${pitch} ${yaw} 0`);
+      return;
+    }
+    // Flat mode: keep camera forward and pan within shader.
+    cam.setAttribute('rotation', '0 0 0');
+    flat.setAttribute('material', `shader: ma-equirect-video; src: #${id}; centerYaw: ${yaw}; centerPitch: ${pitch}; fov: ${fov}`);
   };
 
   scene.addEventListener('mousedown', (ev) => {
@@ -305,7 +401,7 @@ function createVrViewer(pathValue) {
 
     yaw -= dx * sensitivity;
     pitch = clamp(pitch - dy * sensitivity, -85, 85);
-    applyRotation();
+    applyView();
     ev.preventDefault();
   });
 
@@ -327,6 +423,31 @@ function createVrViewer(pathValue) {
   scene.appendChild(sphere);
   scene.appendChild(cam);
 
+  // Attach flat plane to camera so it behaves like a normal flat video player.
+  cam.appendChild(flat);
+
+  // Keep the flat view aspect ratio aligned to the actual video.
+  const updateFlatSize = () => {
+    const w = vid.videoWidth;
+    const h = vid.videoHeight;
+    const aspect = (typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0) ? (w / h) : (16 / 9);
+    const baseHeight = 1.8;
+    const width = baseHeight * aspect;
+    flat.setAttribute('geometry', `primitive: plane; width: ${width}; height: ${baseHeight}`);
+  };
+  vid.addEventListener('loadedmetadata', updateFlatSize);
+  updateFlatSize();
+
+  let viewMode = 'vr'; // 'vr' | 'flat'
+  const applyViewMode = () => {
+    const isVr = viewMode === 'vr';
+    sphere.setAttribute('visible', isVr ? 'true' : 'false');
+    flat.setAttribute('visible', isVr ? 'false' : 'true');
+    // Keep drag-to-look in both modes.
+    scene.style.cursor = dragging ? 'grabbing' : 'grab';
+    applyView();
+  };
+
   const actions = document.createElement('div');
   actions.className = 'previewActions';
 
@@ -343,8 +464,50 @@ function createVrViewer(pathValue) {
 
   actions.appendChild(playBtn);
 
+  const viewBtn = document.createElement('button');
+  viewBtn.className = 'btn';
+  viewBtn.type = 'button';
+  viewBtn.textContent = 'Flat';
+  viewBtn.onclick = () => {
+    viewMode = viewMode === 'vr' ? 'flat' : 'vr';
+    viewBtn.textContent = viewMode === 'vr' ? 'Flat' : 'VR';
+    applyViewMode();
+  };
+  actions.appendChild(viewBtn);
+
+  const setFov = (next) => {
+    const n = Number(next);
+    if (!Number.isFinite(n)) return;
+    fov = clamp(Math.floor(n), 30, 120);
+    applyView();
+  };
+
+  const fov60 = document.createElement('button');
+  fov60.className = 'btn';
+  fov60.type = 'button';
+  fov60.textContent = 'FOV 60';
+  fov60.onclick = () => setFov(60);
+
+  const fov90 = document.createElement('button');
+  fov90.className = 'btn';
+  fov90.type = 'button';
+  fov90.textContent = 'FOV 90';
+  fov90.onclick = () => setFov(90);
+
+  const fov110 = document.createElement('button');
+  fov110.className = 'btn';
+  fov110.type = 'button';
+  fov110.textContent = 'FOV 110';
+  fov110.onclick = () => setFov(110);
+
+  actions.appendChild(fov60);
+  actions.appendChild(fov90);
+  actions.appendChild(fov110);
+
   root.appendChild(scene);
   root.appendChild(actions);
+
+  applyViewMode();
 
   return { root, videoEl: vid };
 }
