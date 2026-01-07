@@ -6,6 +6,15 @@ let analyzeTimer = null;
 let expanded = new Set();
 let analysisByPath = new Map();
 
+const filters = {
+  kind: '',
+  container: '',
+  videoCodec: '',
+  audioCodec: '',
+  resolution: '',
+  name: ''
+};
+
 const el = (id) => document.getElementById(id);
 
 function joinPath(base, name) {
@@ -54,7 +63,7 @@ function fmtDuration(sec) {
   return `${minutes}m ${seconds.toFixed(0)}s`;
 }
 
-function kvRow(key, value) {
+function dashKvRow(key, value) {
   const k = document.createElement('div');
   k.className = 'dashRowKey';
   k.textContent = key;
@@ -62,6 +71,34 @@ function kvRow(key, value) {
   v.className = 'dashRowVal';
   v.textContent = fmt(value);
   return [k, v];
+}
+
+function detailsKvRow(key, value) {
+  const k = document.createElement('div');
+  k.className = 'kvKey';
+  k.textContent = key;
+  const v = document.createElement('div');
+  v.className = 'kvVal';
+  v.textContent = fmt(value);
+  return [k, v];
+}
+
+function setSelectOptions(selectEl, values) {
+  if (!selectEl) return;
+  const prev = selectEl.value;
+  selectEl.innerHTML = '';
+  const optAny = document.createElement('option');
+  optAny.value = '';
+  optAny.textContent = 'Any';
+  selectEl.appendChild(optAny);
+
+  for (const v of values) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v;
+    selectEl.appendChild(opt);
+  }
+  selectEl.value = prev;
 }
 
 function renderAnalysisDetails(analysis) {
@@ -109,12 +146,12 @@ function renderAnalysisDetails(analysis) {
   basicsTitle.textContent = 'Basics';
   const basicsKv = document.createElement('div');
   basicsKv.className = 'kv';
-  basicsKv.append(...kvRow('Path', analysis.path));
-  basicsKv.append(...kvRow('Type', analysis.kind));
-  basicsKv.append(...kvRow('Size', prettyBytes(analysis.sizeBytes)));
-  basicsKv.append(...kvRow('Modified', analysis.modifiedAt));
-  basicsKv.append(...kvRow('Duration', fmtDuration(analysis.durationSec)));
-  basicsKv.append(...kvRow('Bitrate', analysis.bitRate ? `${analysis.bitRate} bps` : '—'));
+  basicsKv.append(...detailsKvRow('Path', analysis.path));
+  basicsKv.append(...detailsKvRow('Type', analysis.kind));
+  basicsKv.append(...detailsKvRow('Size', prettyBytes(analysis.sizeBytes)));
+  basicsKv.append(...detailsKvRow('Modified', analysis.modifiedAt));
+  basicsKv.append(...detailsKvRow('Duration', fmtDuration(analysis.durationSec)));
+  basicsKv.append(...detailsKvRow('Bitrate', analysis.bitRate ? `${analysis.bitRate} bps` : '—'));
   basics.appendChild(basicsTitle);
   basics.appendChild(basicsKv);
 
@@ -125,8 +162,8 @@ function renderAnalysisDetails(analysis) {
   containerTitle.textContent = 'Container';
   const containerKv = document.createElement('div');
   containerKv.className = 'kv';
-  containerKv.append(...kvRow('Format', analysis.container?.formatName));
-  containerKv.append(...kvRow('Format (long)', analysis.container?.formatLongName));
+  containerKv.append(...detailsKvRow('Format', analysis.container?.formatName));
+  containerKv.append(...detailsKvRow('Format (long)', analysis.container?.formatLongName));
   container.appendChild(containerTitle);
   container.appendChild(containerKv);
 
@@ -137,11 +174,11 @@ function renderAnalysisDetails(analysis) {
   videoTitle.textContent = 'Video';
   const videoKv = document.createElement('div');
   videoKv.className = 'kv';
-  videoKv.append(...kvRow('Codec', analysis.video?.codec));
-  videoKv.append(...kvRow('Codec (long)', analysis.video?.codecLongName));
-  videoKv.append(...kvRow('Resolution', fmtResolution(analysis)));
-  videoKv.append(...kvRow('Pixel format', analysis.video?.pixelFormat));
-  videoKv.append(...kvRow('Frame rate', analysis.video?.frameRate));
+  videoKv.append(...detailsKvRow('Codec', analysis.video?.codec));
+  videoKv.append(...detailsKvRow('Codec (long)', analysis.video?.codecLongName));
+  videoKv.append(...detailsKvRow('Resolution', fmtResolution(analysis)));
+  videoKv.append(...detailsKvRow('Pixel format', analysis.video?.pixelFormat));
+  videoKv.append(...detailsKvRow('Frame rate', analysis.video?.frameRate));
   video.appendChild(videoTitle);
   video.appendChild(videoKv);
 
@@ -152,10 +189,10 @@ function renderAnalysisDetails(analysis) {
   audioTitle.textContent = 'Audio';
   const audioKv = document.createElement('div');
   audioKv.className = 'kv';
-  audioKv.append(...kvRow('Codec', analysis.audio?.codec));
-  audioKv.append(...kvRow('Codec (long)', analysis.audio?.codecLongName));
-  audioKv.append(...kvRow('Sample rate', analysis.audio?.sampleRate ? `${analysis.audio.sampleRate} Hz` : '—'));
-  audioKv.append(...kvRow('Channels', analysis.audio?.channels));
+  audioKv.append(...detailsKvRow('Codec', analysis.audio?.codec));
+  audioKv.append(...detailsKvRow('Codec (long)', analysis.audio?.codecLongName));
+  audioKv.append(...detailsKvRow('Sample rate', analysis.audio?.sampleRate ? `${analysis.audio.sampleRate} Hz` : '—'));
+  audioKv.append(...detailsKvRow('Channels', analysis.audio?.channels));
   audio.appendChild(audioTitle);
   audio.appendChild(audioKv);
 
@@ -205,13 +242,13 @@ function renderDashboard(dashboard) {
     : '—';
 
   totalsEl.innerHTML = '';
-  totalsEl.append(...kvRow('Selected', safeTotals.selectedCount));
-  totalsEl.append(...kvRow('Analyzed OK', safeTotals.analyzedOkCount));
-  totalsEl.append(...kvRow('Analyze errors', safeTotals.analyzedErrorCount));
-  totalsEl.append(...kvRow('Total size', prettyBytes(safeTotals.totalSizeBytes) ?? '—'));
-  totalsEl.append(...kvRow('Total duration', fmtDuration(safeTotals.totalDurationSec)));
-  totalsEl.append(...kvRow('Duration range', durationRange));
-  totalsEl.append(...kvRow('Bitrate range', bitRateRange));
+  totalsEl.append(...dashKvRow('Selected', safeTotals.selectedCount));
+  totalsEl.append(...dashKvRow('Analyzed OK', safeTotals.analyzedOkCount));
+  totalsEl.append(...dashKvRow('Analyze errors', safeTotals.analyzedErrorCount));
+  totalsEl.append(...dashKvRow('Total size', prettyBytes(safeTotals.totalSizeBytes) ?? '—'));
+  totalsEl.append(...dashKvRow('Total duration', fmtDuration(safeTotals.totalDurationSec)));
+  totalsEl.append(...dashKvRow('Duration range', durationRange));
+  totalsEl.append(...dashKvRow('Bitrate range', bitRateRange));
 
   function renderCountList(targetEl, items) {
     if (!targetEl) return;
@@ -244,11 +281,127 @@ function renderDashboard(dashboard) {
   renderCountList(vcodecEl, dash?.counts?.videoCodec);
   renderCountList(acodecEl, dash?.counts?.audioCodec);
   renderCountList(resEl, dash?.counts?.resolution);
+
+  // Populate filter dropdowns from dashboard values
+  setSelectOptions(el('filterKind'), (dash?.counts?.kind ?? []).map((x) => x.key));
+  setSelectOptions(el('filterContainer'), (dash?.counts?.containerFormat ?? []).map((x) => x.key));
+  setSelectOptions(el('filterVideoCodec'), (dash?.counts?.videoCodec ?? []).map((x) => x.key));
+  setSelectOptions(el('filterAudioCodec'), (dash?.counts?.audioCodec ?? []).map((x) => x.key));
+  setSelectOptions(el('filterResolution'), (dash?.counts?.resolution ?? []).map((x) => x.key));
+
+  renderAnalyzedTable();
+}
+
+function matchesFilters(a) {
+  if (!a || a.error) return false;
+  if (filters.kind && a.kind !== filters.kind) return false;
+  if (filters.container && (a.container?.formatName ?? '') !== filters.container) return false;
+  if (filters.videoCodec && (a.video?.codec ?? '') !== filters.videoCodec) return false;
+  if (filters.audioCodec && (a.audio?.codec ?? '') !== filters.audioCodec) return false;
+  if (filters.resolution && fmtResolution(a) !== filters.resolution) return false;
+  if (filters.name) {
+    const n = (a.name ?? '').toLowerCase();
+    const p = (a.path ?? '').toLowerCase();
+    const q = filters.name.toLowerCase();
+    if (!n.includes(q) && !p.includes(q)) return false;
+  }
+  return true;
+}
+
+function renderAnalyzedTable() {
+  const table = el('analyzedTable');
+  if (!table) return;
+  table.innerHTML = '';
+
+  const analyses = Array.isArray(lastAnalyses) ? lastAnalyses : [];
+  const filtered = analyses.filter(matchesFilters);
+
+  const summary = el('filterSummary');
+  if (summary) {
+    summary.textContent = filtered.length ? `${filtered.length}/${analyses.length} shown` : `0/${analyses.length} shown`;
+  }
+
+  const header = document.createElement('div');
+  header.className = 'tableRow tableHeader';
+  const headers = ['File', 'Kind', 'Size', 'Video', 'Audio', 'Res'];
+  for (const h of headers) {
+    const c = document.createElement('div');
+    c.className = 'cell';
+    c.textContent = h;
+    header.appendChild(c);
+  }
+  table.appendChild(header);
+
+  if (filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'muted small';
+    empty.style.padding = '10px';
+    empty.textContent = 'No files match the current filters.';
+    table.appendChild(empty);
+    return;
+  }
+
+  for (const a of filtered) {
+    const row = document.createElement('div');
+    row.className = 'tableRow';
+    row.style.cursor = 'pointer';
+    row.onclick = () => {
+      const p = a.path;
+      if (!p) return;
+      if (expanded.has(p)) expanded.delete(p);
+      else expanded.add(p);
+      browse(currentPath);
+      renderAnalyzedTable();
+    };
+
+    const cells = [
+      a.name ?? a.path,
+      a.kind,
+      prettyBytes(a.sizeBytes) ?? '—',
+      a.video?.codec ?? '—',
+      a.audio?.codec ?? '—',
+      fmtResolution(a)
+    ];
+    for (const v of cells) {
+      const c = document.createElement('div');
+      c.className = 'cell';
+      c.textContent = fmt(v);
+      row.appendChild(c);
+    }
+    table.appendChild(row);
+
+    if (a.path && expanded.has(a.path)) {
+      const detailsWrap = document.createElement('div');
+      detailsWrap.style.padding = '0 10px 10px';
+      detailsWrap.appendChild(renderAnalysisDetails(a));
+      table.appendChild(detailsWrap);
+    }
+  }
 }
 
 function renderSelected() {
   const list = el('selectedList');
   list.innerHTML = '';
+
+  const summary = el('selectionSummary');
+  if (summary) {
+    const selectedPaths = Array.from(selected.values());
+    const known = selectedPaths.map((p) => analysisByPath.get(p)).filter(Boolean);
+    const ok = known.filter((a) => a && !a.error);
+    const err = known.filter((a) => a && a.error);
+    const totalSize = ok.reduce((sum, a) => sum + (typeof a.sizeBytes === 'number' ? a.sizeBytes : 0), 0);
+    const totalDur = ok.reduce((sum, a) => sum + (typeof a.durationSec === 'number' ? a.durationSec : 0), 0);
+
+    const parts = [];
+    parts.push(`Selected: ${selectedPaths.length}`);
+    if (known.length > 0) {
+      parts.push(`Analyzed OK: ${ok.length}`);
+      if (err.length) parts.push(`Errors: ${err.length}`);
+      if (totalSize) parts.push(`Size: ${prettyBytes(totalSize)}`);
+      if (totalDur) parts.push(`Duration: ${fmtDuration(totalDur)}`);
+    }
+    summary.textContent = parts.join(' • ');
+  }
 
   const items = Array.from(selected.values()).sort((a, b) => a.localeCompare(b));
   for (const p of items) {
@@ -270,6 +423,16 @@ function renderSelected() {
     li.appendChild(btn);
     list.appendChild(li);
   }
+}
+
+async function analyzeAllFolders() {
+  setStatus('Analyzing all media (all folders)…');
+  const resp = await fetch('/api/analyze-all', { method: 'POST' });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Analyze-all failed');
+  const analyzed = typeof data.analyzed === 'number' ? data.analyzed : 0;
+  const errors = typeof data.errors === 'number' ? data.errors : 0;
+  setStatus(`Analyze-all complete: ${analyzed} analyzed, ${errors} errors.`);
 }
 
 async function analyzeOne(filePath) {
@@ -404,6 +567,7 @@ async function analyzeSelected() {
       .map((a) => [a.path, a])
   );
   renderDashboard(data.dashboard);
+  renderSelected();
 
   // show a compact view plus raw
   const compact = lastAnalyses.map((a) => {
@@ -423,6 +587,24 @@ async function analyzeSelected() {
 
   el('output').textContent = JSON.stringify({ compact, raw: lastAnalyses }, null, 2);
   setStatus('Analyze complete.');
+}
+
+async function analyzeAllInCurrentFolder() {
+  setStatus('Loading folder…');
+  const q = encodeURIComponent(currentPath ?? '');
+  const resp = await fetch(`/api/browse?path=${q}`);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Browse failed');
+  const files = Array.isArray(data.files) ? data.files : [];
+  if (files.length === 0) {
+    setStatus('No files in this folder.');
+    return;
+  }
+  selected = new Set(files.map((f) => joinPath(currentPath, f)));
+  expanded = new Set();
+  renderSelected();
+  setStatus(`Analyzing ${files.length} file(s)…`);
+  await analyzeSelected();
 }
 
 function scheduleAnalyze() {
@@ -465,9 +647,59 @@ function wire() {
   el('btnUp').onclick = () => browse(parentPath(currentPath));
   el('btnAnalyze').onclick = () => analyzeSelected().catch((e) => setStatus(e.message));
   el('btnCompare').onclick = () => compare().catch((e) => setStatus(e.message));
+
+  const btnAnalyzeAll = el('btnAnalyzeAll');
+  if (btnAnalyzeAll) {
+    btnAnalyzeAll.onclick = () => analyzeAllInCurrentFolder().catch((e) => setStatus(e.message));
+  }
+
+  const btnAnalyzeAllGlobal = el('btnAnalyzeAllGlobal');
+  if (btnAnalyzeAllGlobal) {
+    btnAnalyzeAllGlobal.onclick = () => analyzeAllFolders().catch((e) => setStatus(e.message));
+  }
+
+  const bindFilter = (id, key) => {
+    const node = el(id);
+    if (!node) return;
+    node.addEventListener('input', () => {
+      filters[key] = node.value ?? '';
+      renderAnalyzedTable();
+    });
+    node.addEventListener('change', () => {
+      filters[key] = node.value ?? '';
+      renderAnalyzedTable();
+    });
+  };
+
+  bindFilter('filterKind', 'kind');
+  bindFilter('filterContainer', 'container');
+  bindFilter('filterVideoCodec', 'videoCodec');
+  bindFilter('filterAudioCodec', 'audioCodec');
+  bindFilter('filterResolution', 'resolution');
+  bindFilter('filterName', 'name');
+
+  const clear = el('btnClearFilters');
+  if (clear) {
+    clear.onclick = () => {
+      filters.kind = '';
+      filters.container = '';
+      filters.videoCodec = '';
+      filters.audioCodec = '';
+      filters.resolution = '';
+      filters.name = '';
+
+      const ids = ['filterKind', 'filterContainer', 'filterVideoCodec', 'filterAudioCodec', 'filterResolution', 'filterName'];
+      for (const id of ids) {
+        const n = el(id);
+        if (n) n.value = '';
+      }
+      renderAnalyzedTable();
+    };
+  }
 }
 
 wire();
+renderSelected();
 renderDashboard(null);
 browse('').catch((e) => {
   setStatus(`Browse failed: ${e.message}`);

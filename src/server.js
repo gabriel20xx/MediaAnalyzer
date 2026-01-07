@@ -1,11 +1,13 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import fs from 'node:fs/promises';
 import { browsePath, resolveWithinRoot } from './fsBrowse.js';
 import { analyzeFiles } from './analyze.js';
 import { compareAnalyses } from './compare.js';
 import { buildDashboard } from './dashboard.js';
 import { createPool, ensureSchema, upsertAnalyses, isDbEnabled } from './db.js';
+import chokidar from 'chokidar';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +19,30 @@ app.use(express.static(path.join(__dirname, '../public')));
 const port = Number(process.env.PORT ?? 3000);
 const mediaRoot = process.env.MEDIA_ROOT ?? '/media';
 const dbPool = createPool();
+
+async function listAllFilesRecursive(absRoot, relBase = '') {
+  const absDir = path.join(absRoot, relBase);
+  const entries = await fs.readdir(absDir, { withFileTypes: true });
+
+  const files = [];
+  for (const ent of entries) {
+    const rel = relBase ? `${relBase}/${ent.name}` : ent.name;
+    if (ent.isDirectory()) {
+      files.push(...await listAllFilesRecursive(absRoot, rel));
+      continue;
+    }
+    if (ent.isFile()) {
+      files.push(rel);
+    }
+  }
+  return files;
+}
+
+function chunkArray(items, size) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, dbEnabled: isDbEnabled() });
@@ -68,6 +94,83 @@ app.post('/api/compare', async (req, res) => {
   }
 });
 
+app.post('/api/analyze-all', async (req, res) => {
+  try {
+    const allFiles = await listAllFilesRecursive(mediaRoot);
+    if (allFiles.length === 0) {
+      return res.json({ analyzed: 0, errors: 0 });
+    }
+
+    const batchSize = Number(process.env.ANALYZE_ALL_BATCH_SIZE ?? 25);
+    const batches = chunkArray(allFiles, Number.isFinite(batchSize) && batchSize > 0 ? batchSize : 25);
+
+    let analyzedOk = 0;
+    let analyzedErr = 0;
+    for (const batch of batches) {
+      const results = await analyzeFiles(mediaRoot, batch);
+      await upsertAnalyses(dbPool, results);
+      for (const r of results) {
+        if (r?.error) analyzedErr++;
+        else analyzedOk++;
+      }
+    }
+
+    res.json({ analyzed: analyzedOk, errors: analyzedErr });
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? 'Analyze-all failed' });
+  }
+});
+
+function startMediaWatcher() {
+  const enabled = String(process.env.WATCH_MEDIA ?? '1') !== '0';
+  if (!enabled) return;
+
+  const debounceMs = Number(process.env.WATCH_DEBOUNCE_MS ?? 2000);
+  const delayMs = Number.isFinite(debounceMs) && debounceMs >= 0 ? debounceMs : 2000;
+  const pending = new Map();
+
+  const schedule = (absPath) => {
+    if (!absPath) return;
+    const prev = pending.get(absPath);
+    if (prev) clearTimeout(prev);
+    const t = setTimeout(async () => {
+      pending.delete(absPath);
+
+      try {
+        const rel = path.relative(mediaRoot, absPath).split(path.sep).join('/');
+        // Ensure it's still within root
+        const resolved = resolveWithinRoot(mediaRoot, rel);
+        const results = await analyzeFiles(mediaRoot, [resolved.relative]);
+        await upsertAnalyses(dbPool, results);
+        // eslint-disable-next-line no-console
+        console.log(`Auto-analyzed: ${resolved.relative}`);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`Auto-analyze failed for ${absPath}: ${err?.message ?? err}`);
+      }
+    }, delayMs);
+    pending.set(absPath, t);
+  };
+
+  const watcher = chokidar.watch(mediaRoot, {
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: delayMs,
+      pollInterval: 200
+    }
+  });
+
+  watcher.on('add', schedule);
+  watcher.on('change', schedule);
+  watcher.on('error', (err) => {
+    // eslint-disable-next-line no-console
+    console.error(`Media watcher error: ${err?.message ?? err}`);
+  });
+
+  // eslint-disable-next-line no-console
+  console.log(`Media watcher enabled (root=${mediaRoot}, debounce=${delayMs}ms)`);
+}
+
 async function start() {
   // Postgres may not be ready when the container starts; retry a bit.
   if (dbPool) {
@@ -101,6 +204,8 @@ async function start() {
     console.log(`MEDIA_ROOT=${mediaRoot}`);
     // eslint-disable-next-line no-console
     console.log(`DB=${isDbEnabled() ? 'enabled' : 'disabled'}`);
+
+    startMediaWatcher();
   });
 }
 

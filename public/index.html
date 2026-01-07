@@ -19,6 +19,7 @@
         <div class="row">
           <h2>Dashboard</h2>
           <div class="spacer"></div>
+          <button id="btnAnalyzeAllGlobal" class="btn primary">Analyze all (all folders)</button>
           <div class="muted small">Updates automatically from current selection</div>
         </div>
 
@@ -47,6 +48,42 @@
             <div class="dashTitle">Resolutions</div>
             <div class="dashList" id="dashResolution"></div>
           </div>
+
+          <div class="dashCard">
+            <div class="dashTitle">Filters</div>
+            <div class="formGrid">
+              <div class="field">
+                <div class="fieldLabel">Kind</div>
+                <select id="filterKind" class="select"></select>
+              </div>
+              <div class="field">
+                <div class="fieldLabel">Container format</div>
+                <select id="filterContainer" class="select"></select>
+              </div>
+              <div class="field">
+                <div class="fieldLabel">Video codec</div>
+                <select id="filterVideoCodec" class="select"></select>
+              </div>
+              <div class="field">
+                <div class="fieldLabel">Audio codec</div>
+                <select id="filterAudioCodec" class="select"></select>
+              </div>
+              <div class="field">
+                <div class="fieldLabel">Resolution</div>
+                <select id="filterResolution" class="select"></select>
+              </div>
+              <div class="field">
+                <div class="fieldLabel">Name contains</div>
+                <input id="filterName" class="input" type="text" placeholder="e.g. trailer" />
+              </div>
+            </div>
+
+            <div class="row" style="margin-top: 10px;">
+              <button id="btnClearFilters" class="btn">Clear filters</button>
+              <div class="spacer"></div>
+              <div id="filterSummary" class="muted small"></div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -55,6 +92,7 @@
           <h2>Browser</h2>
           <div class="spacer"></div>
           <button id="btnRefresh" class="btn">Refresh</button>
+          <button id="btnAnalyzeAll" class="btn primary">Analyze all (this folder)</button>
         </div>
 
         <div class="muted small">MEDIA_ROOT is mounted into the container (default: <code>/media</code>).</div>
@@ -85,6 +123,8 @@
 
         <div class="muted small">Select multiple files to compare similarities/differences.</div>
 
+        <div id="selectionSummary" class="muted small" style="margin-top: 8px;"></div>
+
         <ul id="selectedList" class="list"></ul>
       </section>
 
@@ -96,6 +136,9 @@
         </div>
 
         <div id="status" class="status"></div>
+
+        <div class="label" style="margin-top: 10px;">Analyzed (filtered)</div>
+        <div id="analyzedTable" class="table"></div>
 
         <div class="label" style="margin-top: 10px;">Details (raw)</div>
         <pre id="output" class="output"></pre>

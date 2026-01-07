@@ -1,3 +1,4 @@
+/* Clean version (previous file was accidentally corrupted by patching). */
 :root {
   --bg: #0b0f17;
   --panel: #121a26;
@@ -9,18 +10,23 @@
 }
 
 * { box-sizing: border-box; }
+html, body { max-width: 100%; overflow-x: hidden; }
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
 }
+
+pre { max-width: 100%; }
 code { color: var(--muted); }
 
 .header {
   border-bottom: 1px solid var(--border);
   background: #0a0e16;
 }
+
 .container {
   max-width: 1100px;
   margin: 0 auto;
@@ -31,6 +37,7 @@ code { color: var(--muted); }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+  min-width: 0;
 }
 
 .panel {
@@ -38,21 +45,21 @@ code { color: var(--muted); }
   background: var(--panel);
   border-radius: 10px;
   padding: 14px;
-html, body { max-width: 100%; overflow-x: hidden; }
+  min-width: 0;
 }
 
 .panel.full { grid-column: 1 / -1; }
 
 .row {
   display: flex;
-pre { max-width: 100%; }
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
+
 .row.gap { margin-top: 10px; }
 .spacer { flex: 1; }
 
-  min-width: 0;
 h1, h2 { margin: 0; }
 h2 { font-size: 16px; }
 
@@ -60,14 +67,13 @@ h2 { font-size: 16px; }
 .small { font-size: 12px; }
 
 .columns {
-  min-width: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   margin-top: 12px;
+  min-width: 0;
 }
 
-  min-width: 0;
 .label {
   font-size: 12px;
   color: var(--muted);
@@ -75,7 +81,6 @@ h2 { font-size: 16px; }
 }
 
 .list {
-  min-width: 0;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -84,6 +89,7 @@ h2 { font-size: 16px; }
   overflow: auto;
   min-height: 220px;
   max-height: 45vh;
+  min-width: 0;
 }
 
 .list li {
@@ -97,6 +103,10 @@ h2 { font-size: 16px; }
 
 .list li:last-child { border-bottom: 0; }
 
+.list li.detailsRow {
+  display: block;
+}
+
 .list li button {
   margin-left: auto;
 }
@@ -109,84 +119,12 @@ h2 { font-size: 16px; }
   white-space: nowrap;
 }
 
-.inlineDetails {
-  margin: 8px 0 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px;
-  background: #0a0e16;
-  overflow: auto;
-  max-height: 220px;
-  width: 100%;
-}
-
-.detailsHeader {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.detailsTitle {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detailsMeta {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.detailsSections {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.detailsSection {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px;
-  background: var(--panel);
-  min-width: 0;
-}
-
-.detailsSectionTitle {
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 8px;
-}
-
-.kv {
-  display: grid;
-  grid-template-columns: 130px 1fr;
-  gap: 6px 10px;
-  font-size: 12px;
-  min-width: 0;
-}
-
-.kvKey {
-  color: var(--muted);
-}
-
-.kvVal {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@media (max-width: 900px) {
-  .detailsSections { grid-template-columns: 1fr; }
-  .kv { grid-template-columns: 120px 1fr; }
-}
-
 .path {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -200,6 +138,7 @@ h2 { font-size: 16px; }
   padding: 8px 10px;
   cursor: pointer;
 }
+
 .btn.primary {
   background: var(--btn2);
   border-color: rgba(255,255,255,0.15);
@@ -221,6 +160,7 @@ h2 { font-size: 16px; }
   max-height: 420px;
 }
 
+/* Dashboard */
 .dashCards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -287,9 +227,135 @@ h2 { font-size: 16px; }
   font-size: 12px;
 }
 
+/* Filters */
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.field { min-width: 0; }
+
+.fieldLabel {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.input, .select {
+  width: 100%;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+/* Per-file details */
+.inlineDetails {
+  margin: 8px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: #0a0e16;
+  overflow: auto;
+  max-height: 260px;
+  width: 100%;
+}
+
+.detailsHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.detailsTitle {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailsMeta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detailsSections {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.detailsSection {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--panel);
+  min-width: 0;
+}
+
+.detailsSectionTitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 6px 10px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.kvKey { color: var(--muted); }
+.kvVal {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Analyzed list */
+.table {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tableRow {
+  display: grid;
+  grid-template-columns: 1.5fr 80px 110px 120px 120px 100px;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  min-width: 0;
+}
+
+.tableRow:last-child { border-bottom: 0; }
+
+.tableHeader {
+  background: #0a0e16;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
   .columns { grid-template-columns: 1fr; }
   .dashCards { grid-template-columns: 1fr; }
   .dashKv { grid-template-columns: 140px 1fr; }
+  .formGrid { grid-template-columns: 1fr; }
+  .detailsSections { grid-template-columns: 1fr; }
+  .kv { grid-template-columns: 120px 1fr; }
+  .tableRow { grid-template-columns: 1fr; }
 }
