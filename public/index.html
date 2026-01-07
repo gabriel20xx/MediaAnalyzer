@@ -14,6 +14,13 @@
       </div>
     </header>
 
+    <div class="topStatus">
+      <div class="container">
+        <div id="progress" class="progress hidden"><div class="bar"></div></div>
+        <div id="status" class="status"></div>
+      </div>
+    </div>
+
     <main class="container grid">
       <section class="panel full">
         <div class="row">
@@ -99,7 +106,7 @@
         <div id="searchTable" class="table"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel full">
         <div class="row">
           <h2>Browser</h2>
           <div class="spacer"></div>
@@ -129,19 +136,6 @@
         <div class="label" style="margin-top: 12px;">Selected</div>
         <div id="selectionSummary" class="muted small" style="margin-bottom: 8px;"></div>
         <ul id="selectedList" class="list"></ul>
-      </section>
-
-      <section class="panel full">
-        <div class="row">
-          <h2>Results</h2>
-          <div class="spacer"></div>
-          <button id="btnCompare" class="btn">Compare</button>
-        </div>
-
-        <div id="status" class="status"></div>
-
-        <div class="label" style="margin-top: 10px;">Details (raw)</div>
-        <pre id="output" class="output"></pre>
       </section>
     </main>
 

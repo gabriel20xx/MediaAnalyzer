@@ -1,0 +1,43 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Build / cache
+coverage/
+.nyc_output/
+.cache/
+.tmp/
+tmp/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Docker / local volumes
+**/data/
+**/pgdata/
+
+# Optional local media folder (keep repo clean)
+media/
+
+# Git
+*.orig
+*.rej

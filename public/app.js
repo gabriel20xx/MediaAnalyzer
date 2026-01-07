@@ -5,6 +5,7 @@ let lastDashboard = null;
 let analyzeTimer = null;
 let expanded = new Set();
 let analysisByPath = new Map();
+let isAnalyzing = false;
 
 let searchTimer = null;
 let searchResults = [];
@@ -221,8 +222,16 @@ function renderAnalysisDetails(analysis) {
   return wrap;
 }
 
-function setStatus(msg) {
-  el('status').textContent = msg;
+function setBusy(isBusy) {
+  const p = el('progress');
+  if (!p) return;
+  p.classList.toggle('hidden', !isBusy);
+}
+
+function setStatus(msg, busy = null) {
+  const s = el('status');
+  if (s) s.textContent = msg;
+  if (busy !== null) setBusy(Boolean(busy));
 }
 
 function renderDashboard(dashboard) {
@@ -466,13 +475,18 @@ function renderSelected() {
 }
 
 async function analyzeAllFolders() {
-  setStatus('Analyzing all media (all folders)…');
-  const resp = await fetch('/api/analyze-all', { method: 'POST' });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data.error || 'Analyze-all failed');
-  const analyzed = typeof data.analyzed === 'number' ? data.analyzed : 0;
-  const errors = typeof data.errors === 'number' ? data.errors : 0;
-  setStatus(`Analyze-all complete: ${analyzed} analyzed, ${errors} errors.`);
+  setStatus('Analyzing all media (all folders)…', true);
+  try {
+    const resp = await fetch('/api/analyze-all', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Analyze-all failed');
+    const analyzed = typeof data.analyzed === 'number' ? data.analyzed : 0;
+    const errors = typeof data.errors === 'number' ? data.errors : 0;
+    setStatus(`Analyze-all complete: ${analyzed} analyzed, ${errors} errors.`, false);
+  } catch (e) {
+    setStatus(e.message, false);
+    throw e;
+  }
 }
 
 async function analyzeOne(filePath) {
@@ -622,76 +636,66 @@ function renderBrowse(data) {
 }
 
 async function browse(pathRel) {
-  setStatus('Loading directory…');
+  setStatus('Loading directory…', true);
   const q = encodeURIComponent(pathRel ?? '');
   const resp = await fetch(`/api/browse?path=${q}`);
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || 'Browse failed');
   renderBrowse(data);
-  setStatus('');
+  setStatus('', false);
 }
 
 async function analyzeSelected() {
   const files = Array.from(selected.values());
   if (files.length === 0) {
-    setStatus('Select one or more files first.');
+    setStatus('Select one or more files first.', false);
     return;
   }
 
-  setStatus(`Analyzing ${files.length} file(s)…`);
+  setStatus(`Analyzing ${files.length} file(s)…`, true);
+  isAnalyzing = true;
 
-  const resp = await fetch('/api/analyze', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ files })
-  });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data.error || 'Analyze failed');
+  try {
+    const resp = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ files })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Analyze failed');
 
-  lastAnalyses = data.results ?? [];
-  analysisByPath = new Map(
-    lastAnalyses
-      .filter((a) => a && a.path)
-      .map((a) => [a.path, a])
-  );
-  renderDashboard(data.dashboard);
-  renderSelected();
-
-  // show a compact view plus raw
-  const compact = lastAnalyses.map((a) => {
-    if (a.error) return a;
-    return {
-      path: a.path,
-      kind: a.kind,
-      size: prettyBytes(a.sizeBytes),
-      container: a.container?.formatName,
-      video: a.video?.codec,
-      resolution: a.video?.width && a.video?.height ? `${a.video.width}x${a.video.height}` : null,
-      audio: a.audio?.codec,
-      durationSec: a.durationSec,
-      bitRate: a.bitRate
-    };
-  });
-
-  el('output').textContent = JSON.stringify({ compact, raw: lastAnalyses }, null, 2);
-  setStatus('Analyze complete.');
+    lastAnalyses = data.results ?? [];
+    analysisByPath = new Map(
+      lastAnalyses
+        .filter((a) => a && a.path)
+        .map((a) => [a.path, a])
+    );
+    renderDashboard(data.dashboard);
+    renderSelected();
+    setStatus('Analyze complete.', false);
+  } catch (e) {
+    setStatus(e.message, false);
+    throw e;
+  } finally {
+    isAnalyzing = false;
+  }
 }
 
 async function analyzeAllInCurrentFolder() {
-  setStatus('Loading folder…');
+  setStatus('Loading folder…', true);
   const q = encodeURIComponent(currentPath ?? '');
   const resp = await fetch(`/api/browse?path=${q}`);
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || 'Browse failed');
   const files = Array.isArray(data.files) ? data.files : [];
   if (files.length === 0) {
-    setStatus('No files in this folder.');
+    setStatus('No files in this folder.', false);
     return;
   }
   selected = new Set(files.map((f) => joinPath(currentPath, f)));
   expanded = new Set();
   renderSelected();
-  setStatus(`Analyzing ${files.length} file(s)…`);
+  setStatus(`Analyzing ${files.length} file(s)…`, true);
   await analyzeSelected();
 }
 
@@ -700,25 +704,24 @@ function scheduleAnalyze() {
     clearTimeout(analyzeTimer);
   }
   analyzeTimer = setTimeout(() => {
-    loadSelectedFromDb().catch(() => {
-      // noop
-    });
+    if (isAnalyzing) return;
+    analyzeSelected().catch((e) => setStatus(e.message, false));
   }, 450);
 }
 
 async function compare() {
   if (!Array.isArray(lastAnalyses) || lastAnalyses.length < 2) {
-    setStatus('Analyze at least 2 files first.');
+    setStatus('Analyze at least 2 files first.', false);
     return;
   }
 
   const good = lastAnalyses.filter((a) => !a.error);
   if (good.length < 2) {
-    setStatus('Need at least 2 successfully analyzed files.');
+    setStatus('Need at least 2 successfully analyzed files.', false);
     return;
   }
 
-  setStatus('Comparing…');
+  setStatus('Comparing…', true);
 
   const resp = await fetch('/api/compare', {
     method: 'POST',
@@ -729,14 +732,15 @@ async function compare() {
   if (!resp.ok) throw new Error(data.error || 'Compare failed');
 
   el('output').textContent = JSON.stringify(data, null, 2);
-  setStatus('Compare complete.');
+  setStatus('Compare complete.', false);
 }
 
 function wire() {
   el('btnRefresh').onclick = () => browse(currentPath);
   el('btnUp').onclick = () => browse(parentPath(currentPath));
   el('btnAnalyze').onclick = () => analyzeSelected().catch((e) => setStatus(e.message));
-  el('btnCompare').onclick = () => compare().catch((e) => setStatus(e.message));
+  const btnCompare = el('btnCompare');
+  if (btnCompare) btnCompare.onclick = () => compare().catch((e) => setStatus(e.message));
 
   const btnAnalyzeAll = el('btnAnalyzeAll');
   if (btnAnalyzeAll) {
@@ -803,7 +807,7 @@ wire();
 renderSelected();
 renderDashboard(null);
 browse('').catch((e) => {
-  setStatus(`Browse failed: ${e.message}`);
+  setStatus(`Browse failed: ${e.message}`, false);
 });
 
 loadSearchOptions()
