@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MediaAnalyzer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="container">
+        <h1>MediaAnalyzer</h1>
+        <div class="muted">Browse a folder, select files, analyze & compare.</div>
+      </div>
+    </header>
+
+    <main class="container grid">
+      <section class="panel">
+        <div class="row">
+          <h2>Browser</h2>
+          <div class="spacer"></div>
+          <button id="btnRefresh" class="btn">Refresh</button>
+        </div>
+
+        <div class="muted small">MEDIA_ROOT is mounted into the container (default: <code>/media</code>).</div>
+
+        <div class="row gap">
+          <button id="btnUp" class="btn">Up</button>
+          <div class="path" id="currentPath">/</div>
+        </div>
+
+        <div class="columns">
+          <div>
+            <div class="label">Folders</div>
+            <ul id="dirList" class="list"></ul>
+          </div>
+          <div>
+            <div class="label">Files</div>
+            <ul id="fileList" class="list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="row">
+          <h2>Selection</h2>
+          <div class="spacer"></div>
+          <button id="btnAnalyze" class="btn primary">Analyze selected</button>
+        </div>
+
+        <div class="muted small">Select multiple files to compare similarities/differences.</div>
+
+        <ul id="selectedList" class="list"></ul>
+      </section>
+
+      <section class="panel full">
+        <div class="row">
+          <h2>Results</h2>
+          <div class="spacer"></div>
+          <button id="btnCompare" class="btn">Compare</button>
+        </div>
+
+        <div id="status" class="status"></div>
+        <pre id="output" class="output"></pre>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+services:
+  media-analyzer:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - MEDIA_ROOT=/media
+    volumes:
+      # Set MEDIA_HOST_PATH in a .env file (recommended) or in your shell.
+      # Windows example: MEDIA_HOST_PATH=C:\Users\gabri\Videos
+      - "${MEDIA_HOST_PATH:-./media}:/media:ro"

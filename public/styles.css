@@ -1,0 +1,138 @@
+:root {
+  --bg: #0b0f17;
+  --panel: #121a26;
+  --text: #e8eefc;
+  --muted: #a9b6d3;
+  --border: #25334a;
+  --btn: #1a2740;
+  --btn2: #2a4cff;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+code { color: var(--muted); }
+
+.header {
+  border-bottom: 1px solid var(--border);
+  background: #0a0e16;
+}
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.panel.full { grid-column: 1 / -1; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.row.gap { margin-top: 10px; }
+.spacer { flex: 1; }
+
+h1, h2 { margin: 0; }
+h2 { font-size: 16px; }
+
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  min-height: 220px;
+}
+
+.list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.list li:last-child { border-bottom: 0; }
+
+.list li button {
+  margin-left: auto;
+}
+
+.path {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  background: var(--btn);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.btn.primary {
+  background: var(--btn2);
+  border-color: rgba(255,255,255,0.15);
+}
+
+.status {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.output {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #0a0e16;
+  overflow: auto;
+  max-height: 420px;
+}
+
+@media (max-width: 900px) {
+  .grid { grid-template-columns: 1fr; }
+  .columns { grid-template-columns: 1fr; }
+}
