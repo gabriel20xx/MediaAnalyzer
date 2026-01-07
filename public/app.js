@@ -866,8 +866,21 @@ function renderBrowse(data) {
           expanded.delete(p);
           browse(currentPath);
           return;
+        }
+
+        expanded.add(p);
+        setStatus('Loading details…');
+        try {
+          if (!analysisByPath.has(p)) {
+            try {
+              const dataDb = await loadFromDb([p]);
+              const r = Array.isArray(dataDb.results) ? dataDb.results[0] : null;
+              if (r && r.path) analysisByPath.set(r.path, r);
+            } catch {
+              // ignore; fall back to on-demand analyze
             }
 
+            if (!analysisByPath.has(p)) {
               setStatus('Analyzing file…');
               await analyzeOne(p);
             }
