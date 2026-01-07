@@ -38,18 +38,21 @@ code { color: var(--muted); }
   background: var(--panel);
   border-radius: 10px;
   padding: 14px;
+html, body { max-width: 100%; overflow-x: hidden; }
 }
 
 .panel.full { grid-column: 1 / -1; }
 
 .row {
   display: flex;
+pre { max-width: 100%; }
   align-items: center;
   gap: 10px;
 }
 .row.gap { margin-top: 10px; }
 .spacer { flex: 1; }
 
+  min-width: 0;
 h1, h2 { margin: 0; }
 h2 { font-size: 16px; }
 
@@ -57,12 +60,14 @@ h2 { font-size: 16px; }
 .small { font-size: 12px; }
 
 .columns {
+  min-width: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   margin-top: 12px;
 }
 
+  min-width: 0;
 .label {
   font-size: 12px;
   color: var(--muted);
@@ -70,6 +75,7 @@ h2 { font-size: 16px; }
 }
 
 .list {
+  min-width: 0;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -114,6 +120,68 @@ h2 { font-size: 16px; }
   width: 100%;
 }
 
+.detailsHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.detailsTitle {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailsMeta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detailsSections {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.detailsSection {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--panel);
+  min-width: 0;
+}
+
+.detailsSectionTitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 6px 10px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.kvKey {
+  color: var(--muted);
+}
+
+.kvVal {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .detailsSections { grid-template-columns: 1fr; }
+  .kv { grid-template-columns: 120px 1fr; }
+}
+
 .path {
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -153,7 +221,75 @@ h2 { font-size: 16px; }
   max-height: 420px;
 }
 
+.dashCards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.dashCard {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #0a0e16;
+  min-width: 0;
+}
+
+.dashTitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.dashKv {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 6px 10px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.dashRowKey { color: var(--muted); }
+.dashRowVal {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashList {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.dashItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dashItemKey {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashPill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--text);
+  background: var(--btn);
+  font-size: 12px;
+}
+
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
   .columns { grid-template-columns: 1fr; }
+  .dashCards { grid-template-columns: 1fr; }
+  .dashKv { grid-template-columns: 140px 1fr; }
 }

@@ -15,6 +15,41 @@
     </header>
 
     <main class="container grid">
+      <section class="panel full">
+        <div class="row">
+          <h2>Dashboard</h2>
+          <div class="spacer"></div>
+          <div class="muted small">Updates automatically from current selection</div>
+        </div>
+
+        <div class="dashCards" id="dashCards">
+          <div class="dashCard">
+            <div class="dashTitle">Totals</div>
+            <div class="dashKv" id="dashTotals"></div>
+          </div>
+          <div class="dashCard">
+            <div class="dashTitle">Kinds</div>
+            <div class="dashList" id="dashKind"></div>
+          </div>
+          <div class="dashCard">
+            <div class="dashTitle">Container formats</div>
+            <div class="dashList" id="dashContainer"></div>
+          </div>
+          <div class="dashCard">
+            <div class="dashTitle">Video codecs</div>
+            <div class="dashList" id="dashVideoCodec"></div>
+          </div>
+          <div class="dashCard">
+            <div class="dashTitle">Audio codecs</div>
+            <div class="dashList" id="dashAudioCodec"></div>
+          </div>
+          <div class="dashCard">
+            <div class="dashTitle">Resolutions</div>
+            <div class="dashList" id="dashResolution"></div>
+          </div>
+        </div>
+      </section>
+
       <section class="panel">
         <div class="row">
           <h2>Browser</h2>
@@ -62,10 +97,7 @@
 
         <div id="status" class="status"></div>
 
-        <div class="label" style="margin-top: 10px;">Dashboard</div>
-        <pre id="dashboard" class="output"></pre>
-
-        <div class="label" style="margin-top: 10px;">Details</div>
+        <div class="label" style="margin-top: 10px;">Details (raw)</div>
         <pre id="output" class="output"></pre>
       </section>
     </main>
