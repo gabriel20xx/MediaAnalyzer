@@ -1023,8 +1023,11 @@ function wire() {
   if (tabSearch) tabSearch.onclick = () => setActiveTab('search');
   if (tabBrowser) tabBrowser.onclick = () => setActiveTab('browser');
 
-  el('btnRefresh').onclick = () => browse(currentPath);
-  el('btnUp').onclick = () => browse(parentPath(currentPath));
+  const btnRefresh = el('btnRefresh');
+  if (btnRefresh) btnRefresh.onclick = () => browse(currentPath);
+
+  const btnUp = el('btnUp');
+  if (btnUp) btnUp.onclick = () => browse(parentPath(currentPath));
   const btnCompare = el('btnCompare');
   if (btnCompare) btnCompare.onclick = () => compare().catch((e) => setStatus(e.message));
 
@@ -1099,25 +1102,34 @@ function wire() {
   }
 }
 
-wire();
-setActiveTab('dashboard');
-loadFileLayoutFromStorage();
-applyFileLayoutUi();
-browse('').catch((e) => {
-  setStatus(`Browse failed: ${e.message}`, false);
-});
+function init() {
+  try {
+    wire();
+    setActiveTab('dashboard');
+    loadFileLayoutFromStorage();
+    applyFileLayoutUi();
 
-renderDashboard(null);
-loadDashboardFromDb().catch(() => {
-  // ignore
-});
+    renderDashboard(null);
+    loadDashboardFromDb().catch(() => {
+      // ignore
+    });
 
-loadSearchOptions()
-  .then(() => {
-    const summary = el('searchSummary');
-    if (summary) summary.textContent = 'Set a filter to search';
-    renderSearchTable();
-  })
-  .catch(() => {
-    // Search panel is optional if DB is disabled/unreachable.
-  });
+    browse('').catch((e) => {
+      setStatus(`Browse failed: ${e.message}`, false);
+    });
+
+    loadSearchOptions()
+      .then(() => {
+        const summary = el('searchSummary');
+        if (summary) summary.textContent = 'Set a filter to search';
+        renderSearchTable();
+      })
+      .catch(() => {
+        // Search panel is optional if DB is disabled/unreachable.
+      });
+  } catch (e) {
+    setStatus(`Startup failed: ${e?.message ?? e}`, false);
+  }
+}
+
+init();

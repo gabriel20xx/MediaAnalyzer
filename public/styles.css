@@ -25,6 +25,14 @@ code { color: var(--muted); }
 .header {
   border-bottom: 1px solid var(--border);
   background: #0a0e16;
+  position: relative;
+  z-index: 2;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .container {
@@ -52,6 +60,9 @@ code { color: var(--muted); }
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  margin-left: auto;
+  position: relative;
+  z-index: 3;
 }
 
 .tabBtn {
@@ -63,6 +74,8 @@ code { color: var(--muted); }
   border-radius: 10px;
   cursor: pointer;
   font-size: 13px;
+  pointer-events: auto;
+  user-select: none;
 }
 
 .tabBtn.active {
@@ -266,6 +279,8 @@ audio.gridMedia {
 .topStatus {
   border-bottom: 1px solid var(--border);
   background: #0a0e16;
+  position: relative;
+  z-index: 1;
 }
 
 .progress {
