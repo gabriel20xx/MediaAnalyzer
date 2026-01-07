@@ -120,3 +120,92 @@ export async function getAnalysesByPaths(pool, paths) {
   // data is the normalized analysis JSON we stored
   return rows.map((r) => r.data);
 }
+
+export async function getSearchOptions(pool) {
+  if (!pool) {
+    return {
+      kind: [],
+      containerFormat: [],
+      videoCodec: [],
+      audioCodec: [],
+      resolution: []
+    };
+  }
+
+  const q = async (sql) => {
+    const { rows } = await pool.query(sql);
+    return rows.map((r) => r.v).filter(Boolean);
+  };
+
+  const [kind, containerFormat, videoCodec, audioCodec, resolution] = await Promise.all([
+    q('SELECT DISTINCT kind AS v FROM media_analysis WHERE kind IS NOT NULL ORDER BY v;'),
+    q('SELECT DISTINCT container_format AS v FROM media_analysis WHERE container_format IS NOT NULL ORDER BY v;'),
+    q('SELECT DISTINCT video_codec AS v FROM media_analysis WHERE video_codec IS NOT NULL ORDER BY v;'),
+    q('SELECT DISTINCT audio_codec AS v FROM media_analysis WHERE audio_codec IS NOT NULL ORDER BY v;'),
+    q("SELECT DISTINCT (width::text || 'x' || height::text) AS v FROM media_analysis WHERE width IS NOT NULL AND height IS NOT NULL ORDER BY v;")
+  ]);
+
+  return { kind, containerFormat, videoCodec, audioCodec, resolution };
+}
+
+export async function searchAnalyses(pool, filters, scopePrefix) {
+  if (!pool) return [];
+
+  const f = filters && typeof filters === 'object' ? filters : {};
+  const where = [];
+  const params = [];
+  let i = 1;
+
+  const addEq = (col, val) => {
+    if (!val) return;
+    where.push(`${col} = $${i}`);
+    params.push(val);
+    i++;
+  };
+
+  addEq('kind', typeof f.kind === 'string' ? f.kind : '');
+  addEq('container_format', typeof f.container === 'string' ? f.container : '');
+  addEq('video_codec', typeof f.videoCodec === 'string' ? f.videoCodec : '');
+  addEq('audio_codec', typeof f.audioCodec === 'string' ? f.audioCodec : '');
+
+  const res = typeof f.resolution === 'string' ? f.resolution : '';
+  if (res) {
+    const m = /^\s*(\d+)x(\d+)\s*$/.exec(res);
+    if (m) {
+      where.push(`width = $${i}`);
+      params.push(Number(m[1]));
+      i++;
+      where.push(`height = $${i}`);
+      params.push(Number(m[2]));
+      i++;
+    }
+  }
+
+  const name = typeof f.name === 'string' ? f.name.trim() : '';
+  if (name) {
+    where.push(`path ILIKE $${i}`);
+    params.push(`%${name}%`);
+    i++;
+  }
+
+  const prefix = typeof scopePrefix === 'string' ? scopePrefix.trim() : '';
+  if (prefix) {
+    where.push(`path LIKE $${i}`);
+    params.push(`${prefix.replace(/%/g, '\\%').replace(/_/g, '\\_')}%`);
+    i++;
+  }
+
+  const max = Number(process.env.SEARCH_MAX_RESULTS ?? 2000);
+  const limit = Number.isFinite(max) && max > 0 ? Math.floor(max) : 2000;
+
+  const sql = `
+    SELECT data
+    FROM media_analysis
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY path
+    LIMIT ${limit};
+  `;
+
+  const { rows } = await pool.query(sql, params);
+  return rows.map((r) => r.data);
+}

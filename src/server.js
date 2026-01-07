@@ -6,7 +6,7 @@ import { browsePath, resolveWithinRoot } from './fsBrowse.js';
 import { analyzeFiles } from './analyze.js';
 import { compareAnalyses } from './compare.js';
 import { buildDashboard } from './dashboard.js';
-import { createPool, ensureSchema, upsertAnalyses, isDbEnabled, getAnalysesByPaths } from './db.js';
+import { createPool, ensureSchema, upsertAnalyses, isDbEnabled, getAnalysesByPaths, getSearchOptions, searchAnalyses } from './db.js';
 import chokidar from 'chokidar';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -42,6 +42,41 @@ function chunkArray(items, size) {
   const out = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
+}
+
+function pickSearchFilters(body) {
+  const f = body && typeof body === 'object' ? body : {};
+  return {
+    kind: typeof f.kind === 'string' ? f.kind : '',
+    container: typeof f.container === 'string' ? f.container : '',
+    videoCodec: typeof f.videoCodec === 'string' ? f.videoCodec : '',
+    audioCodec: typeof f.audioCodec === 'string' ? f.audioCodec : '',
+    resolution: typeof f.resolution === 'string' ? f.resolution : '',
+    name: typeof f.name === 'string' ? f.name : '',
+    scope: typeof f.scope === 'string' ? f.scope : 'all',
+    basePath: typeof f.basePath === 'string' ? f.basePath : ''
+  };
+}
+
+function analysisMatchesFilters(a, filters) {
+  if (!a || a.error) return false;
+  if (filters.kind && a.kind !== filters.kind) return false;
+  if (filters.container && (a.container?.formatName ?? '') !== filters.container) return false;
+  if (filters.videoCodec && (a.video?.codec ?? '') !== filters.videoCodec) return false;
+  if (filters.audioCodec && (a.audio?.codec ?? '') !== filters.audioCodec) return false;
+  if (filters.resolution) {
+    const w = a.video?.width;
+    const h = a.video?.height;
+    const res = (typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0) ? `${w}x${h}` : '';
+    if (res !== filters.resolution) return false;
+  }
+  if (filters.name) {
+    const q = filters.name.toLowerCase();
+    const p = (a.path ?? '').toLowerCase();
+    const n = (a.name ?? '').toLowerCase();
+    if (!p.includes(q) && !n.includes(q)) return false;
+  }
+  return true;
 }
 
 app.get('/api/health', (req, res) => {
@@ -109,6 +144,94 @@ app.post('/api/db/analyses', async (req, res) => {
     res.json({ results, dashboard });
   } catch (err) {
     res.status(400).json({ error: err?.message ?? 'Bad request' });
+  }
+});
+
+app.get('/api/search/options', async (req, res) => {
+  try {
+    const options = await getSearchOptions(dbPool);
+    res.json(options);
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? 'Failed to load search options' });
+  }
+});
+
+app.post('/api/search', async (req, res) => {
+  try {
+    const filters = pickSearchFilters(req.body);
+    const nameQ = filters.name.trim().toLowerCase();
+
+    const needsMeta = Boolean(filters.kind || filters.container || filters.videoCodec || filters.audioCodec || filters.resolution);
+
+    // Avoid returning the entire library by default (can be huge).
+    // Require at least one filter (name or metadata) to perform a search.
+    if (!nameQ && !needsMeta) {
+      return res.json({ results: [] });
+    }
+
+    const scopePrefix = (() => {
+      if (filters.scope !== 'current') return '';
+      const resolved = resolveWithinRoot(mediaRoot, filters.basePath || '');
+      return resolved.relative ? `${resolved.relative}/` : '';
+    })();
+
+    // When metadata filters are used, search the DB directly (analyzed files only).
+    if (needsMeta) {
+      if (!dbPool) return res.json({ results: [] });
+      const analyses = await searchAnalyses(dbPool, filters, scopePrefix);
+      const results = analyses
+        .filter((a) => a && a.path)
+        .map((a) => ({ ...a, analyzed: true }));
+      return res.json({ results });
+    }
+
+    const allFiles = await listAllFilesRecursive(mediaRoot);
+    let candidates = allFiles;
+
+    if (scopePrefix) {
+      candidates = candidates.filter((p) => p.startsWith(scopePrefix));
+    }
+
+    if (nameQ) {
+      candidates = candidates.filter((p) => p.toLowerCase().includes(nameQ));
+    }
+
+    if (!dbPool) {
+      // Without DB, we can only return name matches (no metadata filtering possible).
+      return res.json({
+        results: candidates.map((p) => ({ path: p, name: path.posix.basename(p), analyzed: false }))
+      });
+    }
+
+    // Fetch analyses for candidates in chunks to avoid oversized parameter payloads.
+    const chunkSize = Number(process.env.SEARCH_DB_CHUNK_SIZE ?? 2000);
+    const chunks = chunkArray(candidates, Number.isFinite(chunkSize) && chunkSize > 0 ? chunkSize : 2000);
+    const found = new Map();
+    for (const c of chunks) {
+      const analyses = await getAnalysesByPaths(dbPool, c);
+      for (const a of analyses) {
+        if (a && a.path) found.set(a.path, a);
+      }
+    }
+
+    const results = [];
+    for (const p of candidates) {
+      const a = found.get(p);
+      if (needsMeta) {
+        if (a && analysisMatchesFilters(a, filters)) {
+          results.push({ ...a, analyzed: true });
+        }
+        continue;
+      }
+
+      // No metadata filters: include all files, attach analysis if we have it.
+      if (a) results.push({ ...a, analyzed: true });
+      else results.push({ path: p, name: path.posix.basename(p), analyzed: false });
+    }
+
+    res.json({ results });
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? 'Search failed' });
   }
 });
 

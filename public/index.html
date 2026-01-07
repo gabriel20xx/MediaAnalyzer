@@ -48,43 +48,55 @@
             <div class="dashTitle">Resolutions</div>
             <div class="dashList" id="dashResolution"></div>
           </div>
+        </div>
+      </section>
 
-          <div class="dashCard">
-            <div class="dashTitle">Filters</div>
-            <div class="formGrid">
-              <div class="field">
-                <div class="fieldLabel">Kind</div>
-                <select id="filterKind" class="select"></select>
-              </div>
-              <div class="field">
-                <div class="fieldLabel">Container format</div>
-                <select id="filterContainer" class="select"></select>
-              </div>
-              <div class="field">
-                <div class="fieldLabel">Video codec</div>
-                <select id="filterVideoCodec" class="select"></select>
-              </div>
-              <div class="field">
-                <div class="fieldLabel">Audio codec</div>
-                <select id="filterAudioCodec" class="select"></select>
-              </div>
-              <div class="field">
-                <div class="fieldLabel">Resolution</div>
-                <select id="filterResolution" class="select"></select>
-              </div>
-              <div class="field">
-                <div class="fieldLabel">Name contains</div>
-                <input id="filterName" class="input" type="text" placeholder="e.g. trailer" />
-              </div>
-            </div>
+      <section class="panel full">
+        <div class="row">
+          <h2>Search</h2>
+          <div class="spacer"></div>
+          <div class="row" style="gap: 8px;">
+            <div class="muted small">Scope</div>
+            <select id="searchScope" class="select" style="width: 200px;">
+              <option value="all">All folders</option>
+              <option value="current">Current folder</option>
+            </select>
+          </div>
+          <button id="btnClearSearch" class="btn">Clear</button>
+          <div id="searchSummary" class="muted small"></div>
+        </div>
 
-            <div class="row" style="margin-top: 10px;">
-              <button id="btnClearFilters" class="btn">Clear filters</button>
-              <div class="spacer"></div>
-              <div id="filterSummary" class="muted small"></div>
-            </div>
+        <div class="muted small">Searches all files under <code>/media</code>. Metadata filters apply to analyzed files (stored in DB).</div>
+
+        <div class="formGrid" style="margin-top: 10px;">
+          <div class="field">
+            <div class="fieldLabel">Kind</div>
+            <select id="searchKind" class="select"></select>
+          </div>
+          <div class="field">
+            <div class="fieldLabel">Container format</div>
+            <select id="searchContainer" class="select"></select>
+          </div>
+          <div class="field">
+            <div class="fieldLabel">Video codec</div>
+            <select id="searchVideoCodec" class="select"></select>
+          </div>
+          <div class="field">
+            <div class="fieldLabel">Audio codec</div>
+            <select id="searchAudioCodec" class="select"></select>
+          </div>
+          <div class="field">
+            <div class="fieldLabel">Resolution</div>
+            <select id="searchResolution" class="select"></select>
+          </div>
+          <div class="field">
+            <div class="fieldLabel">Name contains</div>
+            <input id="searchName" class="input" type="text" placeholder="e.g. trailer" />
           </div>
         </div>
+
+        <div class="label" style="margin-top: 10px;">Results</div>
+        <div id="searchTable" class="table"></div>
       </section>
 
       <section class="panel">
@@ -127,9 +139,6 @@
         </div>
 
         <div id="status" class="status"></div>
-
-        <div class="label" style="margin-top: 10px;">Analyzed (filtered)</div>
-        <div id="analyzedTable" class="table"></div>
 
         <div class="label" style="margin-top: 10px;">Details (raw)</div>
         <pre id="output" class="output"></pre>

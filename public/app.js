@@ -6,13 +6,17 @@ let analyzeTimer = null;
 let expanded = new Set();
 let analysisByPath = new Map();
 
-const filters = {
+let searchTimer = null;
+let searchResults = [];
+
+const searchFilters = {
   kind: '',
   container: '',
   videoCodec: '',
   audioCodec: '',
   resolution: '',
-  name: ''
+  name: '',
+  scope: 'all'
 };
 
 const el = (id) => document.getElementById(id);
@@ -99,6 +103,18 @@ function setSelectOptions(selectEl, values) {
     selectEl.appendChild(opt);
   }
   selectEl.value = prev;
+}
+
+async function loadSearchOptions() {
+  const resp = await fetch('/api/search/options');
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Failed to load search options');
+
+  setSelectOptions(el('searchKind'), data.kind ?? []);
+  setSelectOptions(el('searchContainer'), data.containerFormat ?? []);
+  setSelectOptions(el('searchVideoCodec'), data.videoCodec ?? []);
+  setSelectOptions(el('searchAudioCodec'), data.audioCodec ?? []);
+  setSelectOptions(el('searchResolution'), data.resolution ?? []);
 }
 
 function renderAnalysisDetails(analysis) {
@@ -281,44 +297,18 @@ function renderDashboard(dashboard) {
   renderCountList(vcodecEl, dash?.counts?.videoCodec);
   renderCountList(acodecEl, dash?.counts?.audioCodec);
   renderCountList(resEl, dash?.counts?.resolution);
-
-  // Populate filter dropdowns from dashboard values
-  setSelectOptions(el('filterKind'), (dash?.counts?.kind ?? []).map((x) => x.key));
-  setSelectOptions(el('filterContainer'), (dash?.counts?.containerFormat ?? []).map((x) => x.key));
-  setSelectOptions(el('filterVideoCodec'), (dash?.counts?.videoCodec ?? []).map((x) => x.key));
-  setSelectOptions(el('filterAudioCodec'), (dash?.counts?.audioCodec ?? []).map((x) => x.key));
-  setSelectOptions(el('filterResolution'), (dash?.counts?.resolution ?? []).map((x) => x.key));
-
-  renderAnalyzedTable();
 }
 
-function matchesFilters(a) {
-  if (!a || a.error) return false;
-  if (filters.kind && a.kind !== filters.kind) return false;
-  if (filters.container && (a.container?.formatName ?? '') !== filters.container) return false;
-  if (filters.videoCodec && (a.video?.codec ?? '') !== filters.videoCodec) return false;
-  if (filters.audioCodec && (a.audio?.codec ?? '') !== filters.audioCodec) return false;
-  if (filters.resolution && fmtResolution(a) !== filters.resolution) return false;
-  if (filters.name) {
-    const n = (a.name ?? '').toLowerCase();
-    const p = (a.path ?? '').toLowerCase();
-    const q = filters.name.toLowerCase();
-    if (!n.includes(q) && !p.includes(q)) return false;
-  }
-  return true;
-}
-
-function renderAnalyzedTable() {
-  const table = el('analyzedTable');
+function renderSearchTable() {
+  const table = el('searchTable');
   if (!table) return;
   table.innerHTML = '';
 
-  const analyses = Array.isArray(lastAnalyses) ? lastAnalyses : [];
-  const filtered = analyses.filter(matchesFilters);
+  const items = Array.isArray(searchResults) ? searchResults : [];
 
-  const summary = el('filterSummary');
+  const summary = el('searchSummary');
   if (summary) {
-    summary.textContent = filtered.length ? `${filtered.length}/${analyses.length} shown` : `0/${analyses.length} shown`;
+    summary.textContent = `${items.length} file(s)`;
   }
 
   const header = document.createElement('div');
@@ -332,34 +322,33 @@ function renderAnalyzedTable() {
   }
   table.appendChild(header);
 
-  if (filtered.length === 0) {
+  if (items.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'muted small';
     empty.style.padding = '10px';
-    empty.textContent = 'No files match the current filters.';
+    empty.textContent = 'No matches.';
     table.appendChild(empty);
     return;
   }
 
-  for (const a of filtered) {
+  for (const a of items) {
+    const p = a?.path;
     const row = document.createElement('div');
     row.className = 'tableRow';
     row.style.cursor = 'pointer';
     row.onclick = () => {
-      const p = a.path;
       if (!p) return;
       if (expanded.has(p)) expanded.delete(p);
       else expanded.add(p);
-      browse(currentPath);
-      renderAnalyzedTable();
+      renderSearchTable();
     };
 
     const cells = [
-      a.name ?? a.path,
-      a.kind,
-      prettyBytes(a.sizeBytes) ?? '—',
-      a.video?.codec ?? '—',
-      a.audio?.codec ?? '—',
+      a?.name ?? a?.path,
+      a?.kind,
+      prettyBytes(a?.sizeBytes) ?? '—',
+      a?.video?.codec ?? '—',
+      a?.audio?.codec ?? '—',
       fmtResolution(a)
     ];
     for (const v of cells) {
@@ -368,15 +357,66 @@ function renderAnalyzedTable() {
       c.textContent = fmt(v);
       row.appendChild(c);
     }
+
+    const selectBtn = document.createElement('button');
+    selectBtn.className = selected.has(p) ? 'btn' : 'btn primary';
+    selectBtn.textContent = selected.has(p) ? 'Selected' : 'Select';
+    selectBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      if (!p) return;
+      selected.add(p);
+      renderSelected();
+      browse(currentPath);
+      scheduleAnalyze();
+      renderSearchTable();
+    };
+    row.appendChild(selectBtn);
+
     table.appendChild(row);
 
-    if (a.path && expanded.has(a.path)) {
+    if (p && expanded.has(p)) {
       const detailsWrap = document.createElement('div');
       detailsWrap.style.padding = '0 10px 10px';
-      detailsWrap.appendChild(renderAnalysisDetails(a));
+      detailsWrap.appendChild(renderAnalysisDetails(a?.analyzed ? a : { path: p, error: 'Not analyzed yet' }));
       table.appendChild(detailsWrap);
     }
   }
+}
+
+async function runSearch() {
+  const body = {
+    kind: searchFilters.kind,
+    container: searchFilters.container,
+    videoCodec: searchFilters.videoCodec,
+    audioCodec: searchFilters.audioCodec,
+    resolution: searchFilters.resolution,
+    name: searchFilters.name,
+    scope: searchFilters.scope,
+    basePath: currentPath
+  };
+  const resp = await fetch('/api/search', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'Search failed');
+  searchResults = Array.isArray(data.results) ? data.results : [];
+  // Keep cache updated so selection summary/details can use DB data.
+  for (const r of searchResults) {
+    if (r && r.path && r.analyzed && !r.error) analysisByPath.set(r.path, r);
+  }
+  renderSearchTable();
+}
+
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    runSearch().catch((e) => {
+      const summary = el('searchSummary');
+      if (summary) summary.textContent = e.message;
+    });
+  }, 350);
 }
 
 function renderSelected() {
@@ -708,42 +748,53 @@ function wire() {
     btnAnalyzeAllGlobal.onclick = () => analyzeAllFolders().catch((e) => setStatus(e.message));
   }
 
-  const bindFilter = (id, key) => {
+  const bindSearch = (id, key) => {
     const node = el(id);
     if (!node) return;
-    node.addEventListener('input', () => {
-      filters[key] = node.value ?? '';
-      renderAnalyzedTable();
-    });
-    node.addEventListener('change', () => {
-      filters[key] = node.value ?? '';
-      renderAnalyzedTable();
-    });
+    const on = () => {
+      searchFilters[key] = node.value ?? '';
+      scheduleSearch();
+    };
+    node.addEventListener('input', on);
+    node.addEventListener('change', on);
   };
 
-  bindFilter('filterKind', 'kind');
-  bindFilter('filterContainer', 'container');
-  bindFilter('filterVideoCodec', 'videoCodec');
-  bindFilter('filterAudioCodec', 'audioCodec');
-  bindFilter('filterResolution', 'resolution');
-  bindFilter('filterName', 'name');
+  bindSearch('searchKind', 'kind');
+  bindSearch('searchContainer', 'container');
+  bindSearch('searchVideoCodec', 'videoCodec');
+  bindSearch('searchAudioCodec', 'audioCodec');
+  bindSearch('searchResolution', 'resolution');
+  bindSearch('searchName', 'name');
 
-  const clear = el('btnClearFilters');
+  const scopeNode = el('searchScope');
+  if (scopeNode) {
+    scopeNode.value = 'all';
+    scopeNode.addEventListener('change', () => {
+      searchFilters.scope = scopeNode.value ?? 'all';
+      scheduleSearch();
+    });
+  }
+
+  const clear = el('btnClearSearch');
   if (clear) {
     clear.onclick = () => {
-      filters.kind = '';
-      filters.container = '';
-      filters.videoCodec = '';
-      filters.audioCodec = '';
-      filters.resolution = '';
-      filters.name = '';
+      searchFilters.kind = '';
+      searchFilters.container = '';
+      searchFilters.videoCodec = '';
+      searchFilters.audioCodec = '';
+      searchFilters.resolution = '';
+      searchFilters.name = '';
+      searchFilters.scope = 'all';
 
-      const ids = ['filterKind', 'filterContainer', 'filterVideoCodec', 'filterAudioCodec', 'filterResolution', 'filterName'];
+      const ids = ['searchKind', 'searchContainer', 'searchVideoCodec', 'searchAudioCodec', 'searchResolution', 'searchName', 'searchScope'];
       for (const id of ids) {
         const n = el(id);
         if (n) n.value = '';
       }
-      renderAnalyzedTable();
+
+      const s = el('searchScope');
+      if (s) s.value = 'all';
+      scheduleSearch();
     };
   }
 }
@@ -754,3 +805,13 @@ renderDashboard(null);
 browse('').catch((e) => {
   setStatus(`Browse failed: ${e.message}`);
 });
+
+loadSearchOptions()
+  .then(() => {
+    const summary = el('searchSummary');
+    if (summary) summary.textContent = 'Set a filter to search';
+    renderSearchTable();
+  })
+  .catch(() => {
+    // Search panel is optional if DB is disabled/unreachable.
+  });
