@@ -234,7 +234,11 @@ export async function getDashboardFromDb(pool, scopePrefix = '') {
         kind: [],
         containerFormat: [],
         videoCodec: [],
+        pixelFormat: [],
+        frameRate: [],
         audioCodec: [],
+        audioSampleRate: [],
+        audioChannels: [],
         resolution: []
       }
     };
@@ -273,6 +277,16 @@ export async function getDashboardFromDb(pool, scopePrefix = '') {
     ORDER BY count DESC, key ASC;
   `;
 
+  const groupExprSql = (expr) => `
+    SELECT ${expr} AS key, COUNT(*)::int AS count
+    FROM media_analysis
+    ${where ? `${where} AND NOT (data ? 'error')` : 'WHERE NOT (data ? \'error\')'}
+    AND ${expr} IS NOT NULL
+    AND ${expr} <> ''
+    GROUP BY 1
+    ORDER BY count DESC, key ASC;
+  `;
+
   const resolutionSql = `
     SELECT (width::text || 'x' || height::text) AS key, COUNT(*)::int AS count
     FROM media_analysis
@@ -282,12 +296,27 @@ export async function getDashboardFromDb(pool, scopePrefix = '') {
     ORDER BY count DESC, key ASC;
   `;
 
-  const [totalsRows, kindRows, containerRows, vcodecRows, acodecRows, resRows] = await Promise.all([
+  const [
+    totalsRows,
+    kindRows,
+    containerRows,
+    vcodecRows,
+    pixfmtRows,
+    frRows,
+    acodecRows,
+    asrRows,
+    achRows,
+    resRows
+  ] = await Promise.all([
     q(totalsSql),
     q(groupSql('kind', 'kind')),
     q(groupSql('container_format', 'containerFormat')),
     q(groupSql('video_codec', 'videoCodec')),
+    q(groupExprSql("(data->'video'->>'pixelFormat')")),
+    q(groupExprSql("(data->'video'->>'frameRate')")),
     q(groupSql('audio_codec', 'audioCodec')),
+    q(groupExprSql("(data->'audio'->>'sampleRate')")),
+    q(groupExprSql("(data->'audio'->>'channels')")),
     q(resolutionSql)
   ]);
 
@@ -321,7 +350,11 @@ export async function getDashboardFromDb(pool, scopePrefix = '') {
       kind: kindRows.map((r) => ({ key: r.key, count: r.count })),
       containerFormat: containerRows.map((r) => ({ key: r.key, count: r.count })),
       videoCodec: vcodecRows.map((r) => ({ key: r.key, count: r.count })),
+      pixelFormat: pixfmtRows.map((r) => ({ key: r.key, count: r.count })),
+      frameRate: frRows.map((r) => ({ key: r.key, count: r.count })),
       audioCodec: acodecRows.map((r) => ({ key: r.key, count: r.count })),
+      audioSampleRate: asrRows.map((r) => ({ key: r.key, count: r.count })),
+      audioChannels: achRows.map((r) => ({ key: r.key, count: r.count })),
       resolution: resRows.map((r) => ({ key: r.key, count: r.count }))
     }
   };

@@ -1,13 +1,8 @@
 let currentPath = '';
-let selected = new Set();
 let lastAnalyses = [];
 let lastDashboard = null;
-let analyzeTimer = null;
 let expanded = new Set();
 let analysisByPath = new Map();
-let isAnalyzing = false;
-
-const STORAGE_SELECTED_KEY = 'mediaanalyzer:selectedPaths';
 
 let searchTimer = null;
 let searchResults = [];
@@ -50,27 +45,6 @@ function applyFileLayoutUi() {
 
   const btn = el('btnToggleFileLayout');
   if (btn) btn.textContent = fileLayout === 'grid' ? 'List view' : 'Grid view';
-}
-
-function saveSelectionToStorage() {
-  try {
-    const items = Array.from(selected.values()).filter((p) => typeof p === 'string' && p.trim());
-    localStorage.setItem(STORAGE_SELECTED_KEY, JSON.stringify(items));
-  } catch {
-    // ignore
-  }
-}
-
-function restoreSelectionFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_SELECTED_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return;
-    selected = new Set(parsed.filter((p) => typeof p === 'string' && p.trim()));
-  } catch {
-    // ignore
-  }
 }
 
 function encodePathForUrl(relPath) {
@@ -410,17 +384,21 @@ async function loadSearchOptions() {
   setSelectOptions(el('searchResolution'), data.resolution ?? []);
 }
 
-function renderAnalysisDetails(analysis) {
+function renderAnalysisDetails(analysis, opts = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'inlineDetails';
+
+  const includePreview = opts?.includePreview !== false;
 
   if (!analysis) {
     wrap.textContent = 'No details available.';
     return wrap;
   }
 
-  const preview = renderMediaPreview(analysis);
-  if (preview) wrap.appendChild(preview);
+  if (includePreview) {
+    const preview = renderMediaPreview(analysis);
+    if (preview) wrap.appendChild(preview);
+  }
 
   if (analysis.error) {
     const header = document.createElement('div');
@@ -537,7 +515,11 @@ function renderDashboard(dashboard) {
   const kindEl = el('dashKind');
   const containerEl = el('dashContainer');
   const vcodecEl = el('dashVideoCodec');
+  const pixfmtEl = el('dashPixelFormat');
+  const frEl = el('dashFrameRate');
   const acodecEl = el('dashAudioCodec');
+  const asrEl = el('dashAudioSampleRate');
+  const achEl = el('dashAudioChannels');
   const resEl = el('dashResolution');
 
   if (!totalsEl) return;
@@ -545,7 +527,6 @@ function renderDashboard(dashboard) {
   const dash = lastDashboard;
 
   const safeTotals = dash?.totals ?? {
-    selectedCount: 0,
     analyzedOkCount: 0,
     analyzedErrorCount: 0,
     totalSizeBytes: 0,
@@ -563,7 +544,6 @@ function renderDashboard(dashboard) {
     : '—';
 
   totalsEl.innerHTML = '';
-  totalsEl.append(...dashKvRow('Selected', safeTotals.selectedCount));
   totalsEl.append(...dashKvRow('Analyzed OK', safeTotals.analyzedOkCount));
   totalsEl.append(...dashKvRow('Analyze errors', safeTotals.analyzedErrorCount));
   totalsEl.append(...dashKvRow('Total size', prettyBytes(safeTotals.totalSizeBytes) ?? '—'));
@@ -571,7 +551,7 @@ function renderDashboard(dashboard) {
   totalsEl.append(...dashKvRow('Duration range', durationRange));
   totalsEl.append(...dashKvRow('Bitrate range', bitRateRange));
 
-  function renderCountList(targetEl, items) {
+  function renderCountList(targetEl, items, keyFormatter = (v) => fmt(v)) {
     if (!targetEl) return;
     targetEl.innerHTML = '';
     const list = Array.isArray(items) ? items : [];
@@ -587,7 +567,7 @@ function renderDashboard(dashboard) {
       row.className = 'dashItem';
       const key = document.createElement('div');
       key.className = 'dashItemKey';
-      key.textContent = fmt(it.key);
+      key.textContent = keyFormatter(it.key);
       const pill = document.createElement('div');
       pill.className = 'dashPill';
       pill.textContent = fmt(it.count);
@@ -600,7 +580,17 @@ function renderDashboard(dashboard) {
   renderCountList(kindEl, dash?.counts?.kind);
   renderCountList(containerEl, dash?.counts?.containerFormat);
   renderCountList(vcodecEl, dash?.counts?.videoCodec);
+  renderCountList(pixfmtEl, dash?.counts?.pixelFormat);
+  renderCountList(frEl, dash?.counts?.frameRate);
   renderCountList(acodecEl, dash?.counts?.audioCodec);
+  renderCountList(asrEl, dash?.counts?.audioSampleRate, (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? `${n} Hz` : fmt(v);
+  });
+  renderCountList(achEl, dash?.counts?.audioChannels, (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? `${n} ch` : fmt(v);
+  });
   renderCountList(resEl, dash?.counts?.resolution);
 }
 
@@ -669,21 +659,6 @@ function renderSearchTable() {
       row.appendChild(c);
     }
 
-    const selectBtn = document.createElement('button');
-    selectBtn.className = selected.has(p) ? 'btn' : 'btn primary';
-    selectBtn.textContent = selected.has(p) ? 'Selected' : 'Select';
-    selectBtn.onclick = (ev) => {
-      ev.stopPropagation();
-      if (!p) return;
-      selected.add(p);
-      saveSelectionToStorage();
-      renderSelected();
-      browse(currentPath);
-      scheduleAnalyze();
-      renderSearchTable();
-    };
-    row.appendChild(selectBtn);
-
     table.appendChild(row);
 
     if (p && expanded.has(p)) {
@@ -714,7 +689,7 @@ async function runSearch() {
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || 'Search failed');
   searchResults = Array.isArray(data.results) ? data.results : [];
-  // Keep cache updated so selection summary/details can use DB data.
+  // Keep cache updated so details can use DB data.
   for (const r of searchResults) {
     if (r && r.path && r.analyzed && !r.error) analysisByPath.set(r.path, r);
   }
@@ -731,92 +706,6 @@ function scheduleSearch() {
   }, 350);
 }
 
-function renderSelected() {
-  const list = el('selectedList');
-  list.innerHTML = '';
-
-  const summary = el('selectionSummary');
-  if (summary) {
-    const selectedPaths = Array.from(selected.values());
-    const known = selectedPaths.map((p) => analysisByPath.get(p)).filter(Boolean);
-    const ok = known.filter((a) => a && !a.error);
-    const err = known.filter((a) => a && a.error);
-    const totalSize = ok.reduce((sum, a) => sum + (typeof a.sizeBytes === 'number' ? a.sizeBytes : 0), 0);
-    const totalDur = ok.reduce((sum, a) => sum + (typeof a.durationSec === 'number' ? a.durationSec : 0), 0);
-
-    const parts = [];
-    parts.push(`Selected: ${selectedPaths.length}`);
-    if (known.length > 0) {
-      parts.push(`Analyzed OK: ${ok.length}`);
-      if (err.length) parts.push(`Errors: ${err.length}`);
-      if (totalSize) parts.push(`Size: ${prettyBytes(totalSize)}`);
-      if (totalDur) parts.push(`Duration: ${fmtDuration(totalDur)}`);
-    }
-    summary.textContent = parts.join(' • ');
-  }
-
-  const items = Array.from(selected.values()).sort((a, b) => a.localeCompare(b));
-  for (const p of items) {
-    const li = document.createElement('li');
-
-    const known = analysisByPath.get(p);
-    const kindHint = known?.kind ?? '';
-    li.appendChild(renderThumb(p, kindHint));
-
-    const name = document.createElement('span');
-    name.className = 'itemName';
-    name.textContent = p;
-    li.appendChild(name);
-
-    const btnDetails = document.createElement('button');
-    btnDetails.className = 'btn';
-    btnDetails.textContent = expanded.has(p) ? 'Hide' : 'Details';
-    btnDetails.onclick = async () => {
-      if (expanded.has(p)) {
-        expanded.delete(p);
-        renderSelected();
-        return;
-      }
-
-      expanded.add(p);
-      // Try to load details from DB if we don't have it yet.
-      if (!analysisByPath.has(p)) {
-        try {
-          const data = await loadFromDb([p]);
-          const r = Array.isArray(data.results) ? data.results[0] : null;
-          if (r && r.path && !r.error) analysisByPath.set(r.path, r);
-        } catch {
-          // ignore
-        }
-      }
-      renderSelected();
-    };
-
-    const btnRemove = document.createElement('button');
-    btnRemove.className = 'btn';
-    btnRemove.textContent = 'Remove';
-    btnRemove.onclick = () => {
-      expanded.delete(p);
-      selected.delete(p);
-      saveSelectionToStorage();
-      renderSelected();
-      scheduleAnalyze();
-    };
-
-    li.appendChild(btnDetails);
-    li.appendChild(btnRemove);
-    list.appendChild(li);
-
-    if (expanded.has(p)) {
-      const analysis = analysisByPath.get(p);
-      const detailsRow = document.createElement('li');
-      detailsRow.className = 'detailsRow';
-      detailsRow.appendChild(renderAnalysisDetails(analysis ?? { path: p, error: 'Not analyzed yet' }));
-      list.appendChild(detailsRow);
-    }
-  }
-}
-
 async function analyzeAllFolders() {
   setStatus('Analyzing all media (all folders)…', true);
   try {
@@ -826,11 +715,7 @@ async function analyzeAllFolders() {
     const analyzed = typeof data.analyzed === 'number' ? data.analyzed : 0;
     const errors = typeof data.errors === 'number' ? data.errors : 0;
     setStatus(`Analyze-all complete: ${analyzed} analyzed, ${errors} errors.`, false);
-
-    // Refresh dashboard/details from DB for current selection (if any).
-    if (selected.size > 0) {
-      await loadSelectedFromDb();
-    }
+    await loadDashboardFromDb();
   } catch (e) {
     setStatus(e.message, false);
     throw e;
@@ -850,6 +735,10 @@ async function analyzeOne(filePath) {
   if (result && result.path) {
     analysisByPath.set(result.path, result);
   }
+  // Keep the dashboard current when analyzing on-demand.
+  loadDashboardFromDb().catch(() => {
+    // ignore
+  });
   return result;
 }
 
@@ -862,29 +751,6 @@ async function loadFromDb(files) {
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || 'DB load failed');
   return data;
-}
-
-async function loadSelectedFromDb() {
-  const files = Array.from(selected.values());
-  if (files.length === 0) {
-    renderDashboard(null);
-    renderSelected();
-    return;
-  }
-
-  try {
-    const data = await loadFromDb(files);
-    lastAnalyses = data.results ?? [];
-    analysisByPath = new Map(
-      lastAnalyses
-        .filter((a) => a && a.path)
-        .map((a) => [a.path, a])
-    );
-    renderDashboard(data.dashboard);
-    renderSelected();
-  } catch (e) {
-    // If DB is disabled, keep UI usable; analysis still works via ffprobe.
-  }
 }
 
 async function loadDashboardFromDb() {
@@ -972,19 +838,38 @@ function renderBrowse(data) {
       title.textContent = f;
       li.appendChild(title);
 
-      const btn = document.createElement('button');
-      btn.className = selected.has(p) ? 'btn' : 'btn primary';
-      btn.textContent = selected.has(p) ? 'Selected' : 'Select';
-      btn.onclick = () => {
-        if (selected.has(p)) selected.delete(p);
-        else selected.add(p);
-        saveSelectionToStorage();
-        renderSelected();
+      const actions = document.createElement('div');
+      actions.className = 'gridActions';
+
+      const btnDetails = document.createElement('button');
+      btnDetails.className = 'btn';
+      btnDetails.textContent = expanded.has(p) ? 'Hide' : 'Details';
+      btnDetails.onclick = async () => {
+        if (expanded.has(p)) {
+          expanded.delete(p);
+          browse(currentPath);
+          return;
+            }
+
+              setStatus('Analyzing file…');
+              await analyzeOne(p);
+            }
+          }
+          setStatus('');
+        } catch (e) {
+          setStatus(e.message);
+        }
         browse(currentPath);
-        scheduleAnalyze();
       };
 
-      li.appendChild(btn);
+      actions.appendChild(btnDetails);
+      li.appendChild(actions);
+
+      if (expanded.has(p)) {
+        const analysis = analysisByPath.get(p);
+        const details = renderAnalysisDetails(analysis ?? { path: p, error: 'Not analyzed yet' }, { includePreview: false });
+        li.appendChild(details);
+      }
       fileList.appendChild(li);
       continue;
     }
@@ -1031,20 +916,7 @@ function renderBrowse(data) {
       browse(currentPath);
     };
 
-    const btn = document.createElement('button');
-    btn.className = 'btn primary';
-    btn.textContent = selected.has(p) ? 'Selected' : 'Select';
-    btn.onclick = () => {
-      if (selected.has(p)) selected.delete(p);
-      else selected.add(p);
-      saveSelectionToStorage();
-      renderSelected();
-      browse(currentPath); // refresh button labels
-      scheduleAnalyze();
-    };
-
     li.appendChild(btnDetails);
-    li.appendChild(btn);
     fileList.appendChild(li);
 
     if (expanded.has(p)) {
@@ -1067,42 +939,6 @@ async function browse(pathRel) {
   setStatus('', false);
 }
 
-async function analyzeSelected() {
-  const files = Array.from(selected.values());
-  if (files.length === 0) {
-    setStatus('Select one or more files first.', false);
-    return;
-  }
-
-  setStatus(`Analyzing ${files.length} file(s)…`, true);
-  isAnalyzing = true;
-
-  try {
-    const resp = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ files })
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || 'Analyze failed');
-
-    lastAnalyses = data.results ?? [];
-    analysisByPath = new Map(
-      lastAnalyses
-        .filter((a) => a && a.path)
-        .map((a) => [a.path, a])
-    );
-    renderDashboard(data.dashboard);
-    renderSelected();
-    setStatus('Analyze complete.', false);
-  } catch (e) {
-    setStatus(e.message, false);
-    throw e;
-  } finally {
-    isAnalyzing = false;
-  }
-}
-
 async function analyzeAllInCurrentFolder() {
   setStatus('Loading folder…', true);
   const q = encodeURIComponent(currentPath ?? '');
@@ -1114,22 +950,26 @@ async function analyzeAllInCurrentFolder() {
     setStatus('No files in this folder.', false);
     return;
   }
-  selected = new Set(files.map((f) => joinPath(currentPath, f)));
-  saveSelectionToStorage();
-  expanded = new Set();
-  renderSelected();
-  setStatus(`Analyzing ${files.length} file(s)…`, true);
-  await analyzeSelected();
-}
-
-function scheduleAnalyze() {
-  if (analyzeTimer) {
-    clearTimeout(analyzeTimer);
+  const filePaths = files.map((f) => joinPath(currentPath, f));
+  setStatus(`Analyzing ${filePaths.length} file(s)…`, true);
+  try {
+    const resp = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ files: filePaths })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Analyze failed');
+    lastAnalyses = data.results ?? [];
+    for (const r of lastAnalyses) {
+      if (r && r.path) analysisByPath.set(r.path, r);
+    }
+    await loadDashboardFromDb();
+    setStatus('Analyze complete.', false);
+  } catch (e) {
+    setStatus(e.message, false);
+    throw e;
   }
-  analyzeTimer = setTimeout(() => {
-    if (isAnalyzing) return;
-    analyzeSelected().catch((e) => setStatus(e.message, false));
-  }, 450);
 }
 
 async function compare() {
@@ -1161,7 +1001,6 @@ async function compare() {
 function wire() {
   el('btnRefresh').onclick = () => browse(currentPath);
   el('btnUp').onclick = () => browse(parentPath(currentPath));
-  el('btnAnalyze').onclick = () => analyzeSelected().catch((e) => setStatus(e.message));
   const btnCompare = el('btnCompare');
   if (btnCompare) btnCompare.onclick = () => compare().catch((e) => setStatus(e.message));
 
@@ -1239,25 +1078,14 @@ function wire() {
 wire();
 loadFileLayoutFromStorage();
 applyFileLayoutUi();
-restoreSelectionFromStorage();
-saveSelectionToStorage();
-renderSelected();
-if (selected.size === 0) renderDashboard(null);
 browse('').catch((e) => {
   setStatus(`Browse failed: ${e.message}`, false);
 });
 
-// Populate dashboard from DB for restored selection (keeps values on reload).
-loadSelectedFromDb().catch(() => {
-  // If DB is disabled/unreachable, dashboard will populate after user analyzes.
+renderDashboard(null);
+loadDashboardFromDb().catch(() => {
+  // ignore
 });
-
-// If nothing is selected, show overall DB dashboard instead of an empty dashboard.
-if (selected.size === 0) {
-  loadDashboardFromDb().catch(() => {
-    // ignore
-  });
-}
 
 loadSearchOptions()
   .then(() => {

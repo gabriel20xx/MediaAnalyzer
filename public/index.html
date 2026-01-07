@@ -10,7 +10,7 @@
     <header class="header">
       <div class="container">
         <h1>MediaAnalyzer</h1>
-        <div class="muted">Browse a folder, select files, analyze & compare.</div>
+        <div class="muted">Browse a folder and analyze media files.</div>
       </div>
     </header>
 
@@ -27,7 +27,7 @@
           <h2>Dashboard</h2>
           <div class="spacer"></div>
           <button id="btnAnalyzeAllGlobal" class="btn primary">Analyze all (all folders)</button>
-          <div class="muted small">Updates automatically from current selection</div>
+          <div class="muted small">Updates from the database</div>
         </div>
 
         <div class="dashCards" id="dashCards">
@@ -40,7 +40,7 @@
             <div class="dashList" id="dashKind"></div>
           </div>
           <div class="dashCard">
-            <div class="dashTitle">Container formats</div>
+            <div class="dashTitle">File formats</div>
             <div class="dashList" id="dashContainer"></div>
           </div>
           <div class="dashCard">
@@ -48,8 +48,24 @@
             <div class="dashList" id="dashVideoCodec"></div>
           </div>
           <div class="dashCard">
+            <div class="dashTitle">Pixel formats</div>
+            <div class="dashList" id="dashPixelFormat"></div>
+          </div>
+          <div class="dashCard">
+            <div class="dashTitle">Frame rates</div>
+            <div class="dashList" id="dashFrameRate"></div>
+          </div>
+          <div class="dashCard">
             <div class="dashTitle">Audio codecs</div>
             <div class="dashList" id="dashAudioCodec"></div>
+          </div>
+          <div class="dashCard">
+            <div class="dashTitle">Audio sample rates</div>
+            <div class="dashList" id="dashAudioSampleRate"></div>
+          </div>
+          <div class="dashCard">
+            <div class="dashTitle">Audio channels</div>
+            <div class="dashList" id="dashAudioChannels"></div>
           </div>
           <div class="dashCard">
             <div class="dashTitle">Resolutions</div>
@@ -112,7 +128,6 @@
           <div class="spacer"></div>
           <button id="btnRefresh" class="btn">Refresh</button>
           <button id="btnToggleFileLayout" class="btn">Grid view</button>
-          <button id="btnAnalyze" class="btn primary">Analyze selected</button>
           <button id="btnAnalyzeAll" class="btn primary">Analyze all (this folder)</button>
         </div>
 
@@ -133,10 +148,6 @@
             <ul id="fileList" class="list"></ul>
           </div>
         </div>
-
-        <div class="label" style="margin-top: 12px;">Selected</div>
-        <div id="selectionSummary" class="muted small" style="margin-bottom: 8px;"></div>
-        <ul id="selectedList" class="list"></ul>
       </section>
     </main>
 
