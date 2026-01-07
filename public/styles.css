@@ -42,35 +42,40 @@ code { color: var(--muted); }
 
 .panel {
   border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 14px;
+  min-width: 0;
+}
+
 .tabs {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
+
 .tabBtn {
   appearance: none;
   border: 1px solid var(--border);
-  background: var(--card);
+  background: var(--btn);
   color: var(--text);
   padding: 6px 10px;
   border-radius: 10px;
   cursor: pointer;
   font-size: 13px;
 }
+
 .tabBtn.active {
-  border-color: var(--borderStrong);
+  border-color: var(--btn2);
   font-weight: 600;
 }
+
 .tabPanel {
   display: none;
 }
+
 .tabPanel.active {
   display: block;
-}
-  background: var(--panel);
-  border-radius: 10px;
-  padding: 14px;
-  min-width: 0;
 }
 
 .panel.full { grid-column: 1 / -1; }
