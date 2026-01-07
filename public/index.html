@@ -92,6 +92,7 @@
           <h2>Browser</h2>
           <div class="spacer"></div>
           <button id="btnRefresh" class="btn">Refresh</button>
+          <button id="btnAnalyze" class="btn primary">Analyze selected</button>
           <button id="btnAnalyzeAll" class="btn primary">Analyze all (this folder)</button>
         </div>
 
@@ -112,19 +113,9 @@
             <ul id="fileList" class="list"></ul>
           </div>
         </div>
-      </section>
 
-      <section class="panel">
-        <div class="row">
-          <h2>Selection</h2>
-          <div class="spacer"></div>
-          <button id="btnAnalyze" class="btn primary">Analyze selected</button>
-        </div>
-
-        <div class="muted small">Select multiple files to compare similarities/differences.</div>
-
-        <div id="selectionSummary" class="muted small" style="margin-top: 8px;"></div>
-
+        <div class="label" style="margin-top: 12px;">Selected</div>
+        <div id="selectionSummary" class="muted small" style="margin-bottom: 8px;"></div>
         <ul id="selectedList" class="list"></ul>
       </section>
 
