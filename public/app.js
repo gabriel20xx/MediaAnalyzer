@@ -451,6 +451,40 @@ async function analyzeOne(filePath) {
   return result;
 }
 
+async function loadFromDb(files) {
+  const resp = await fetch('/api/db/analyses', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ files })
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'DB load failed');
+  return data;
+}
+
+async function loadSelectedFromDb() {
+  const files = Array.from(selected.values());
+  if (files.length === 0) {
+    renderDashboard(null);
+    renderSelected();
+    return;
+  }
+
+  try {
+    const data = await loadFromDb(files);
+    lastAnalyses = data.results ?? [];
+    analysisByPath = new Map(
+      lastAnalyses
+        .filter((a) => a && a.path)
+        .map((a) => [a.path, a])
+    );
+    renderDashboard(data.dashboard);
+    renderSelected();
+  } catch (e) {
+    // If DB is disabled, keep UI usable; analysis still works via ffprobe.
+  }
+}
+
 function renderBrowse(data) {
   currentPath = data.path ?? '';
   el('currentPath').textContent = '/' + currentPath;
@@ -496,10 +530,24 @@ function renderBrowse(data) {
       }
 
       expanded.add(p);
-      setStatus('Analyzing file…');
+      setStatus('Loading details…');
       try {
         if (!analysisByPath.has(p)) {
-          await analyzeOne(p);
+          // Prefer DB if available
+          try {
+            const data = await loadFromDb([p]);
+            const r = Array.isArray(data.results) ? data.results[0] : null;
+            if (r && r.path && !r.error) {
+              analysisByPath.set(r.path, r);
+            }
+          } catch {
+            // ignore; fall back to on-demand analyze
+          }
+
+          if (!analysisByPath.has(p)) {
+            setStatus('Analyzing file…');
+            await analyzeOne(p);
+          }
         }
         setStatus('');
       } catch (e) {
@@ -612,7 +660,9 @@ function scheduleAnalyze() {
     clearTimeout(analyzeTimer);
   }
   analyzeTimer = setTimeout(() => {
-    analyzeSelected().catch((e) => setStatus(e.message));
+    loadSelectedFromDb().catch(() => {
+      // noop
+    });
   }, 450);
 }
 

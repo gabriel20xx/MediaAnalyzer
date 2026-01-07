@@ -6,7 +6,7 @@ import { browsePath, resolveWithinRoot } from './fsBrowse.js';
 import { analyzeFiles } from './analyze.js';
 import { compareAnalyses } from './compare.js';
 import { buildDashboard } from './dashboard.js';
-import { createPool, ensureSchema, upsertAnalyses, isDbEnabled } from './db.js';
+import { createPool, ensureSchema, upsertAnalyses, isDbEnabled, getAnalysesByPaths } from './db.js';
 import chokidar from 'chokidar';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -73,6 +73,38 @@ app.post('/api/analyze', async (req, res) => {
 
     const results = await analyzeFiles(mediaRoot, normalized);
     await upsertAnalyses(dbPool, results);
+    const dashboard = buildDashboard(results);
+    res.json({ results, dashboard });
+  } catch (err) {
+    res.status(400).json({ error: err?.message ?? 'Bad request' });
+  }
+});
+
+app.post('/api/db/analyses', async (req, res) => {
+  try {
+    if (!dbPool) {
+      return res.status(400).json({ error: 'DATABASE_URL not set (DB disabled)' });
+    }
+
+    const files = Array.isArray(req.body?.files) ? req.body.files : [];
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'files must be a non-empty array of relative paths' });
+    }
+
+    const normalized = files.map((p) => {
+      if (typeof p !== 'string') throw new Error('files must be an array of strings');
+      return resolveWithinRoot(mediaRoot, p).relative;
+    });
+
+    const fromDb = await getAnalysesByPaths(dbPool, normalized);
+    const found = new Map(fromDb.filter((a) => a && a.path).map((a) => [a.path, a]));
+
+    const results = normalized.map((p) => {
+      const hit = found.get(p);
+      if (hit) return hit;
+      return { path: p, error: 'Not analyzed yet (no DB entry)' };
+    });
+
     const dashboard = buildDashboard(results);
     res.json({ results, dashboard });
   } catch (err) {

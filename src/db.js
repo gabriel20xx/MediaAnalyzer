@@ -104,3 +104,19 @@ export async function upsertAnalyses(pool, analyses) {
     ]);
   }
 }
+
+export async function getAnalysesByPaths(pool, paths) {
+  if (!pool) return [];
+  const list = Array.isArray(paths) ? paths.filter((p) => typeof p === 'string' && p.length) : [];
+  if (list.length === 0) return [];
+
+  const { rows } = await pool.query(
+    `SELECT path, data
+     FROM media_analysis
+     WHERE path = ANY($1::text[]);`,
+    [list]
+  );
+
+  // data is the normalized analysis JSON we stored
+  return rows.map((r) => r.data);
+}
