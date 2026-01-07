@@ -21,4 +21,13 @@ docker compose up --build
 - Metadata is extracted via `ffprobe` (from `ffmpeg`), plus file stats.
 - If `MEDIA_HOST_PATH` is not set, it mounts `./media` (repo folder) into the container.
 
+## Database
+This project includes a PostgreSQL container. On every analysis run, results are upserted into the `media_analysis` table (keyed by `path`).
+
+To inspect from the host (optional), the DB is exposed on `POSTGRES_HOST_PORT` (default 5432):
+- Connection: `localhost:${POSTGRES_HOST_PORT}`
+- Database: `${POSTGRES_DB}`
+- User: `${POSTGRES_USER}`
+- Password: `${POSTGRES_PASSWORD}`
+
 If you changed `HOST_PORT`, open that port instead.

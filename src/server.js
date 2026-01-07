@@ -5,6 +5,7 @@ import { browsePath, resolveWithinRoot } from './fsBrowse.js';
 import { analyzeFiles } from './analyze.js';
 import { compareAnalyses } from './compare.js';
 import { buildDashboard } from './dashboard.js';
+import { createPool, ensureSchema, upsertAnalyses, isDbEnabled } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,9 +16,10 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 const port = Number(process.env.PORT ?? 3000);
 const mediaRoot = process.env.MEDIA_ROOT ?? '/media';
+const dbPool = createPool();
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, dbEnabled: isDbEnabled() });
 });
 
 app.get('/api/browse', async (req, res) => {
@@ -44,6 +46,7 @@ app.post('/api/analyze', async (req, res) => {
     });
 
     const results = await analyzeFiles(mediaRoot, normalized);
+    await upsertAnalyses(dbPool, results);
     const dashboard = buildDashboard(results);
     res.json({ results, dashboard });
   } catch (err) {
@@ -65,9 +68,40 @@ app.post('/api/compare', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  // eslint-disable-next-line no-console
-  console.log(`MediaAnalyzer listening on port ${port}`);
-  // eslint-disable-next-line no-console
-  console.log(`MEDIA_ROOT=${mediaRoot}`);
-});
+async function start() {
+  // Postgres may not be ready when the container starts; retry a bit.
+  if (dbPool) {
+    const maxAttempts = Number(process.env.DB_INIT_MAX_ATTEMPTS ?? 30);
+    const delayMs = Number(process.env.DB_INIT_DELAY_MS ?? 500);
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await ensureSchema(dbPool);
+        // eslint-disable-next-line no-console
+        console.log(`Database schema ready (attempt ${attempt}/${maxAttempts})`);
+        break;
+      } catch (err) {
+        const isLast = attempt === maxAttempts;
+        // eslint-disable-next-line no-console
+        console.error(
+          `DB init attempt ${attempt}/${maxAttempts} failed: ${err?.message ?? err}`
+        );
+        if (isLast) {
+          process.exit(1);
+        }
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+
+  app.listen(port, () => {
+    // eslint-disable-next-line no-console
+    console.log(`MediaAnalyzer listening on port ${port}`);
+    // eslint-disable-next-line no-console
+    console.log(`MEDIA_ROOT=${mediaRoot}`);
+    // eslint-disable-next-line no-console
+    console.log(`DB=${isDbEnabled() ? 'enabled' : 'disabled'}`);
+  });
+}
+
+start();

@@ -7,7 +7,31 @@ services:
     environment:
       - PORT=3000
       - MEDIA_ROOT=/media
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-media}:${POSTGRES_PASSWORD:-media}@postgres:5432/${POSTGRES_DB:-media}?sslmode=disable
     volumes:
       # Set MEDIA_HOST_PATH in a .env file (recommended) or in your shell.
       # Windows example: MEDIA_HOST_PATH=C:\Users\gabri\Videos
       - "${MEDIA_HOST_PATH:-./media}:/media:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-media}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-media}
+      - POSTGRES_DB=${POSTGRES_DB:-media}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Optional: expose DB to host tools (psql/GUI)
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-media} -d ${POSTGRES_DB:-media}"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres_data:
