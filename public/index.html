@@ -31,7 +31,7 @@
         <div class="row">
           <h2>Dashboard</h2>
           <div class="spacer"></div>
-          <button id="btnAnalyzeAllGlobal" class="btn primary">Analyze all (all folders)</button>
+          <button id="btnAnalyzeAllGlobal" class="btn primary">Analyze all files</button>
           <div class="muted small">Updates from the database</div>
         </div>
 
@@ -77,6 +77,16 @@
             <div class="dashList" id="dashResolution"></div>
           </div>
         </div>
+
+        <div class="row" style="margin-top: 12px;">
+          <div class="label">Matches</div>
+          <div class="spacer"></div>
+          <button id="btnToggleDashLayout" class="btn" type="button">Grid view</button>
+          <button id="btnDashPrev" class="btn" type="button">Prev</button>
+          <button id="btnDashNext" class="btn" type="button">Next</button>
+          <div id="dashMatchesInfo" class="muted small"></div>
+        </div>
+        <ul id="dashMatchesList" class="list"></ul>
       </section>
 
       <section class="panel full tabPanel" data-tab="search">

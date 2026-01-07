@@ -435,3 +435,102 @@ export async function getDashboardFromDb(pool, scopePrefix = '') {
     }
   };
 }
+
+export async function getDashboardMatchesPaged(pool, match, scopePrefix = '', { limit, offset } = {}) {
+  if (!pool) return { items: [], total: 0, limit: 0, offset: 0 };
+
+  const m = match && typeof match === 'object' ? match : {};
+  const key = typeof m.key === 'string' ? m.key.trim() : '';
+  const value = typeof m.value === 'string' ? m.value : '';
+  const status = typeof m.status === 'string' ? m.status.trim() : '';
+
+  const where = [];
+  const params = [];
+  let i = 1;
+
+  const prefix = typeof scopePrefix === 'string' ? scopePrefix.trim() : '';
+  if (prefix) {
+    where.push(`path LIKE $${i} ESCAPE E'\\\\'`);
+    params.push(`${escapeLikePrefix(prefix)}%`);
+    i++;
+  }
+
+  const applyStatus = (s) => {
+    if (s === 'ok') where.push(`NOT (data ? 'error')`);
+    else if (s === 'error') where.push(`(data ? 'error')`);
+  };
+
+  if (status) applyStatus(status);
+  else if (key && key !== 'status' && key !== 'all') {
+    // Dashboard counts exclude errors by design.
+    where.push(`NOT (data ? 'error')`);
+  }
+
+  const addEq = (sqlExpr, val) => {
+    if (val === null || val === undefined || val === '') return;
+    where.push(`${sqlExpr} = $${i}`);
+    params.push(val);
+    i++;
+  };
+
+  if (key === 'all') {
+    // no-op
+  } else if (key === 'status') {
+    applyStatus(value);
+  } else if (key === 'kind') {
+    addEq('kind', value);
+  } else if (key === 'containerFormat') {
+    addEq('container_format', value);
+  } else if (key === 'videoCodec') {
+    addEq('video_codec', value);
+  } else if (key === 'audioCodec') {
+    addEq('audio_codec', value);
+  } else if (key === 'pixelFormat') {
+    addEq("(data->'video'->>'pixelFormat')", value);
+  } else if (key === 'frameRate') {
+    addEq("(data->'video'->>'frameRate')", value);
+  } else if (key === 'audioSampleRate') {
+    addEq("(data->'audio'->>'sampleRate')", value);
+  } else if (key === 'audioChannels') {
+    addEq("(data->'audio'->>'channels')", value);
+  } else if (key === 'resolution') {
+    const res = typeof value === 'string' ? value : '';
+    const mm = /^\s*(\d+)x(\d+)\s*$/.exec(res);
+    if (mm) {
+      where.push(`width = $${i}`);
+      params.push(Number(mm[1]));
+      i++;
+      where.push(`height = $${i}`);
+      params.push(Number(mm[2]));
+      i++;
+    }
+  }
+
+  const max = Number(process.env.SEARCH_MAX_RESULTS ?? 2000);
+  const maxLimit = Number.isFinite(max) && max > 0 ? Math.floor(max) : 2000;
+  const limRaw = Number(limit);
+  const offRaw = Number(offset);
+  const safeLimit = Number.isFinite(limRaw) && limRaw > 0 ? Math.min(Math.floor(limRaw), maxLimit) : Math.min(100, maxLimit);
+  const safeOffset = Number.isFinite(offRaw) && offRaw > 0 ? Math.floor(offRaw) : 0;
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const totalSql = `
+    SELECT COUNT(*)::bigint AS c
+    FROM media_analysis
+    ${whereSql};
+  `;
+  const { rows: totalRows } = await pool.query(totalSql, params);
+  const total = Number(totalRows?.[0]?.c ?? 0);
+
+  const itemsSql = `
+    SELECT data
+    FROM media_analysis
+    ${whereSql}
+    ORDER BY path
+    LIMIT $${i} OFFSET $${i + 1};
+  `;
+  const { rows } = await pool.query(itemsSql, [...params, safeLimit, safeOffset]);
+  const items = rows.map((r) => r.data);
+  return { items, total, limit: safeLimit, offset: safeOffset };
+}

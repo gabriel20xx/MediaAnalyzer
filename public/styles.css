@@ -435,6 +435,15 @@ audio.gridMedia {
 }
 
 .dashRowKey { color: var(--muted); }
+.dashRowKey.clickable,
+.dashRowVal.clickable {
+  cursor: pointer;
+}
+
+.dashRowKey.clickable:hover,
+.dashRowVal.clickable:hover {
+  text-decoration: underline;
+}
 .dashRowVal {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -452,6 +461,14 @@ audio.gridMedia {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.dashItem.clickable {
+  cursor: pointer;
+}
+
+.dashItem.clickable:hover .dashItemKey {
+  text-decoration: underline;
 }
 
 .dashItemKey {
@@ -526,6 +543,7 @@ audio.gridMedia {
 .previewActions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .vrViewer {

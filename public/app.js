@@ -12,6 +12,18 @@ let searchTotal = 0;
 let searchLimit = SEARCH_PAGE_SIZE;
 let searchOffset = 0;
 
+const DASH_MATCH_PAGE_SIZE = 100;
+let dashMatchKey = '';
+let dashMatchValue = '';
+let dashMatchStatus = '';
+let dashMatchResults = [];
+let dashMatchTotal = 0;
+let dashMatchLimit = DASH_MATCH_PAGE_SIZE;
+let dashMatchOffset = 0;
+
+const STORAGE_DASH_LAYOUT_KEY = 'mediaanalyzer:dashMatchLayout';
+let dashMatchLayout = 'list'; // 'list' | 'grid'
+
 const BROWSE_PAGE_SIZE = 200;
 let browseFileTotal = 0;
 let browseFileLimit = BROWSE_PAGE_SIZE;
@@ -138,6 +150,31 @@ function loadFileLayoutFromStorage() {
   } catch {
     // ignore
   }
+}
+
+function loadDashMatchLayoutFromStorage() {
+  try {
+    const v = localStorage.getItem(STORAGE_DASH_LAYOUT_KEY);
+    if (v === 'grid' || v === 'list') dashMatchLayout = v;
+  } catch {
+    // ignore
+  }
+}
+
+function saveDashMatchLayoutToStorage() {
+  try {
+    localStorage.setItem(STORAGE_DASH_LAYOUT_KEY, dashMatchLayout);
+  } catch {
+    // ignore
+  }
+}
+
+function applyDashMatchLayoutUi() {
+  const list = el('dashMatchesList');
+  if (list) list.classList.toggle('grid', dashMatchLayout === 'grid');
+
+  const btn = el('btnToggleDashLayout');
+  if (btn) btn.textContent = dashMatchLayout === 'grid' ? 'List view' : 'Grid view';
 }
 
 function saveFileLayoutToStorage() {
@@ -690,6 +727,196 @@ function dashKvRow(key, value) {
   return [k, v];
 }
 
+function dashKvRowClickable(key, value, onClick) {
+  const [k, v] = dashKvRow(key, value);
+  if (typeof onClick === 'function') {
+    k.classList.add('clickable');
+    v.classList.add('clickable');
+    k.onclick = onClick;
+    v.onclick = onClick;
+  }
+  return [k, v];
+}
+
+function updateDashMatchPager() {
+  const prev = el('btnDashPrev');
+  const next = el('btnDashNext');
+  const info = el('dashMatchesInfo');
+
+  const total = Number.isFinite(dashMatchTotal) ? dashMatchTotal : 0;
+  const limit = Number.isFinite(dashMatchLimit) && dashMatchLimit > 0 ? dashMatchLimit : DASH_MATCH_PAGE_SIZE;
+  const offset = Number.isFinite(dashMatchOffset) && dashMatchOffset >= 0 ? dashMatchOffset : 0;
+
+  const hasPrev = offset > 0;
+  const hasNext = offset + limit < total;
+
+  if (prev) prev.disabled = !hasPrev;
+  if (next) next.disabled = !hasNext;
+
+  if (info) {
+    if (!dashMatchKey) info.textContent = '';
+    else if (!total) info.textContent = '0 matches';
+    else {
+      const start = offset + 1;
+      const end = Math.min(offset + (Array.isArray(dashMatchResults) ? dashMatchResults.length : 0), total);
+      info.textContent = `${start}-${end} of ${total}`;
+    }
+  }
+}
+
+function renderDashMatches() {
+  const list = el('dashMatchesList');
+  if (!list) return;
+  list.innerHTML = '';
+
+  applyDashMatchLayoutUi();
+  updateDashMatchPager();
+
+  if (!dashMatchKey) {
+    const li = document.createElement('li');
+    li.className = 'muted small';
+    li.style.borderBottom = '0';
+    li.textContent = 'Click a value above to see matching media.';
+    list.appendChild(li);
+    return;
+  }
+
+  const items = Array.isArray(dashMatchResults) ? dashMatchResults : [];
+  if (items.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'muted small';
+    li.style.borderBottom = '0';
+    li.textContent = 'No matches.';
+    list.appendChild(li);
+    return;
+  }
+
+  const renderGridMedia = (p, kindHint = '') => {
+    const kind = kindHint || guessKindFromPath(p);
+    if (kind === 'image' || kind === 'video') {
+      const img = document.createElement('img');
+      img.className = 'gridMedia';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = kind;
+      img.src = thumbnailUrl(p, 320);
+      img.onerror = () => {
+        img.style.display = 'none';
+      };
+      return img;
+    }
+    const ph = document.createElement('div');
+    ph.className = 'gridPlaceholder';
+    ph.textContent = kind ? kind.toUpperCase() : 'FILE';
+    return ph;
+  };
+
+  for (const a of items) {
+    const p = a?.path;
+    if (!p) continue;
+
+    const li = document.createElement('li');
+    const name = a?.name ?? baseNameFromPath(p) ?? p;
+    const kindHint = a?.kind ?? '';
+
+    if (dashMatchLayout === 'grid') {
+      li.appendChild(renderGridMedia(p, kindHint));
+
+      const title = document.createElement('div');
+      title.className = 'gridTitle';
+      title.textContent = name;
+      li.appendChild(title);
+
+      const actions = document.createElement('div');
+      actions.className = 'gridActions';
+
+      const btnDetails = document.createElement('button');
+      btnDetails.className = 'btn';
+      btnDetails.type = 'button';
+      btnDetails.textContent = 'Details';
+      btnDetails.onclick = () => showDetailsModal(p);
+
+      actions.appendChild(btnDetails);
+      li.appendChild(actions);
+      list.appendChild(li);
+      continue;
+    }
+
+    li.appendChild(renderThumb(p, kindHint));
+
+    const title = document.createElement('span');
+    title.className = 'itemName';
+    title.textContent = name;
+    li.appendChild(title);
+
+    const btnDetails = document.createElement('button');
+    btnDetails.className = 'btn';
+    btnDetails.type = 'button';
+    btnDetails.textContent = 'Details';
+    btnDetails.onclick = () => showDetailsModal(p);
+    li.appendChild(btnDetails);
+
+    list.appendChild(li);
+  }
+}
+
+async function loadDashboardMatchesPage(nextOffset = 0) {
+  const key = dashMatchKey;
+  if (!key) {
+    dashMatchResults = [];
+    dashMatchTotal = 0;
+    dashMatchOffset = 0;
+    renderDashMatches();
+    return;
+  }
+
+  const offset = Number.isFinite(Number(nextOffset)) && Number(nextOffset) >= 0 ? Math.floor(Number(nextOffset)) : 0;
+  setStatus('Loading matches…', true);
+  try {
+    const resp = await fetch('/api/db/matches', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key: dashMatchKey,
+        value: dashMatchValue,
+        status: dashMatchStatus,
+        scope: 'all',
+        basePath: currentPath ?? '',
+        limit: dashMatchLimit,
+        offset
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Failed to load matches');
+
+    dashMatchResults = Array.isArray(data.results) ? data.results : [];
+    dashMatchTotal = Number.isFinite(Number(data.total)) ? Number(data.total) : dashMatchResults.length;
+    dashMatchLimit = Number.isFinite(Number(data.limit)) ? Number(data.limit) : dashMatchLimit;
+    dashMatchOffset = Number.isFinite(Number(data.offset)) ? Number(data.offset) : offset;
+
+    for (const r of dashMatchResults) {
+      if (r && r.path && r.analyzed && !r.error) analysisByPath.set(r.path, r);
+    }
+
+    renderDashMatches();
+    setStatus('', false);
+  } catch (e) {
+    setStatus(e?.message || 'Failed to load matches', false);
+    dashMatchResults = [];
+    dashMatchTotal = 0;
+    dashMatchOffset = 0;
+    renderDashMatches();
+  }
+}
+
+function setDashboardMatchesQuery({ key, value = '', status = '' }) {
+  dashMatchKey = typeof key === 'string' ? key : '';
+  dashMatchValue = typeof value === 'string' ? value : '';
+  dashMatchStatus = typeof status === 'string' ? status : '';
+  dashMatchOffset = 0;
+  loadDashboardMatchesPage(0);
+}
+
 function detailsKvRow(key, value) {
   const k = document.createElement('div');
   k.className = 'kvKey';
@@ -895,14 +1122,14 @@ function renderDashboard(dashboard) {
     : '—';
 
   totalsEl.innerHTML = '';
-  totalsEl.append(...dashKvRow('Analyzed OK', safeTotals.analyzedOkCount));
-  totalsEl.append(...dashKvRow('Analyze errors', safeTotals.analyzedErrorCount));
-  totalsEl.append(...dashKvRow('Total size', prettyBytes(safeTotals.totalSizeBytes) ?? '—'));
-  totalsEl.append(...dashKvRow('Total duration', fmtDuration(safeTotals.totalDurationSec)));
-  totalsEl.append(...dashKvRow('Duration range', durationRange));
-  totalsEl.append(...dashKvRow('Bitrate range', bitRateRange));
+  totalsEl.append(...dashKvRowClickable('Analyzed OK', safeTotals.analyzedOkCount, () => setDashboardMatchesQuery({ key: 'status', value: 'ok' })));
+  totalsEl.append(...dashKvRowClickable('Analyze errors', safeTotals.analyzedErrorCount, () => setDashboardMatchesQuery({ key: 'status', value: 'error' })));
+  totalsEl.append(...dashKvRowClickable('Total size', prettyBytes(safeTotals.totalSizeBytes) ?? '—', () => setDashboardMatchesQuery({ key: 'status', value: 'ok' })));
+  totalsEl.append(...dashKvRowClickable('Total duration', fmtDuration(safeTotals.totalDurationSec), () => setDashboardMatchesQuery({ key: 'status', value: 'ok' })));
+  totalsEl.append(...dashKvRowClickable('Duration range', durationRange, () => setDashboardMatchesQuery({ key: 'status', value: 'ok' })));
+  totalsEl.append(...dashKvRowClickable('Bitrate range', bitRateRange, () => setDashboardMatchesQuery({ key: 'status', value: 'ok' })));
 
-  function renderCountList(targetEl, items, keyFormatter = (v) => fmt(v)) {
+  function renderCountList(targetEl, items, matchKey, keyFormatter = (v) => fmt(v)) {
     if (!targetEl) return;
     targetEl.innerHTML = '';
     const list = Array.isArray(items) ? items : [];
@@ -924,25 +1151,34 @@ function renderDashboard(dashboard) {
       pill.textContent = fmt(it.count);
       row.appendChild(key);
       row.appendChild(pill);
+
+      if (matchKey && it && it.key !== null && it.key !== undefined && String(it.key).length) {
+        row.classList.add('clickable');
+        row.onclick = () => setDashboardMatchesQuery({ key: matchKey, value: String(it.key) });
+      }
+
       targetEl.appendChild(row);
     }
   }
 
-  renderCountList(kindEl, dash?.counts?.kind);
-  renderCountList(containerEl, dash?.counts?.containerFormat);
-  renderCountList(vcodecEl, dash?.counts?.videoCodec);
-  renderCountList(pixfmtEl, dash?.counts?.pixelFormat);
-  renderCountList(frEl, dash?.counts?.frameRate);
-  renderCountList(acodecEl, dash?.counts?.audioCodec);
-  renderCountList(asrEl, dash?.counts?.audioSampleRate, (v) => {
+  renderCountList(kindEl, dash?.counts?.kind, 'kind');
+  renderCountList(containerEl, dash?.counts?.containerFormat, 'containerFormat');
+  renderCountList(vcodecEl, dash?.counts?.videoCodec, 'videoCodec');
+  renderCountList(pixfmtEl, dash?.counts?.pixelFormat, 'pixelFormat');
+  renderCountList(frEl, dash?.counts?.frameRate, 'frameRate');
+  renderCountList(acodecEl, dash?.counts?.audioCodec, 'audioCodec');
+  renderCountList(asrEl, dash?.counts?.audioSampleRate, 'audioSampleRate', (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? `${n} Hz` : fmt(v);
   });
-  renderCountList(achEl, dash?.counts?.audioChannels, (v) => {
+  renderCountList(achEl, dash?.counts?.audioChannels, 'audioChannels', (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? `${n} ch` : fmt(v);
   });
-  renderCountList(resEl, dash?.counts?.resolution);
+  renderCountList(resEl, dash?.counts?.resolution, 'resolution');
+
+  // Keep matches panel in a coherent state if dashboard reloads.
+  renderDashMatches();
 }
 
 function renderSearchTable() {
@@ -1393,6 +1629,32 @@ function wire() {
     btnAnalyzeAllGlobal.onclick = () => analyzeAllFolders().catch((e) => setStatus(e.message));
   }
 
+  const btnToggleDashLayout = el('btnToggleDashLayout');
+  if (btnToggleDashLayout) {
+    btnToggleDashLayout.onclick = () => {
+      dashMatchLayout = dashMatchLayout === 'grid' ? 'list' : 'grid';
+      saveDashMatchLayoutToStorage();
+      applyDashMatchLayoutUi();
+      renderDashMatches();
+    };
+  }
+
+  const btnDashPrev = el('btnDashPrev');
+  if (btnDashPrev) {
+    btnDashPrev.onclick = () => {
+      const nextOffset = Math.max(0, dashMatchOffset - dashMatchLimit);
+      loadDashboardMatchesPage(nextOffset);
+    };
+  }
+
+  const btnDashNext = el('btnDashNext');
+  if (btnDashNext) {
+    btnDashNext.onclick = () => {
+      const nextOffset = Math.max(0, dashMatchOffset + dashMatchLimit);
+      loadDashboardMatchesPage(nextOffset);
+    };
+  }
+
   const btnToggleLayout = el('btnToggleFileLayout');
   if (btnToggleLayout) {
     btnToggleLayout.onclick = () => {
@@ -1499,7 +1761,11 @@ function init() {
     loadFileLayoutFromStorage();
     applyFileLayoutUi();
 
+    loadDashMatchLayoutFromStorage();
+    applyDashMatchLayoutUi();
+
     renderDashboard(null);
+    renderDashMatches();
     loadDashboardFromDb().catch(() => {
       // ignore
     });

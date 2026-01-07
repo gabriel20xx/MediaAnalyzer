@@ -7,7 +7,7 @@ import { browsePath, resolveWithinRoot } from './fsBrowse.js';
 import { analyzeFiles } from './analyze.js';
 import { compareAnalyses } from './compare.js';
 import { buildDashboard } from './dashboard.js';
-import { createPool, ensureSchema, upsertAnalyses, isDbEnabled, getAnalysesByPaths, getSearchOptions, searchAnalysesPaged, getDashboardFromDb } from './db.js';
+import { createPool, ensureSchema, upsertAnalyses, isDbEnabled, getAnalysesByPaths, getSearchOptions, searchAnalysesPaged, getDashboardFromDb, getDashboardMatchesPaged } from './db.js';
 import chokidar from 'chokidar';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -309,6 +309,36 @@ app.get('/api/db/dashboard', async (req, res) => {
     res.json({ dashboard });
   } catch (err) {
     res.status(500).json({ error: err?.message ?? 'Failed to load DB dashboard' });
+  }
+});
+
+app.post('/api/db/matches', async (req, res) => {
+  try {
+    if (!dbPool) {
+      return res.status(400).json({ error: 'DATABASE_URL not set (DB disabled)' });
+    }
+
+    const key = typeof req.body?.key === 'string' ? req.body.key : '';
+    const value = typeof req.body?.value === 'string' ? req.body.value : '';
+    const status = typeof req.body?.status === 'string' ? req.body.status : '';
+
+    const limit = parseNonNegInt(req.body?.limit, 100);
+    const offset = parseNonNegInt(req.body?.offset, 0);
+
+    const scope = typeof req.body?.scope === 'string' ? req.body.scope : 'all';
+    const basePath = typeof req.body?.basePath === 'string' ? req.body.basePath : '';
+
+    const scopePrefix = (() => {
+      if (scope !== 'current') return '';
+      const resolved = resolveWithinRoot(mediaRoot, basePath || '');
+      return resolved.relative ? `${resolved.relative}/` : '';
+    })();
+
+    const paged = await getDashboardMatchesPaged(dbPool, { key, value, status }, scopePrefix, { limit, offset });
+    const results = (paged.items ?? []).filter((a) => a && a.path).map((a) => ({ ...a, analyzed: true }));
+    res.json({ results, total: paged.total ?? results.length, limit: paged.limit ?? limit, offset: paged.offset ?? offset });
+  } catch (err) {
+    res.status(500).json({ error: err?.message ?? 'Failed to load dashboard matches' });
   }
 });
 
