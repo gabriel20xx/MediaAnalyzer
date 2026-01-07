@@ -356,7 +356,12 @@ function createVrViewer(pathValue) {
 
   const scene = document.createElement('a-scene');
   scene.setAttribute('embedded', '');
-  scene.setAttribute('vr-mode-ui', 'enabled: true');
+  // Disable A-Frame's built-in "Enter VR" UI to avoid the insecure-context (HTTPS) sensor prompt.
+  // The viewer still supports drag-to-look + fullscreen for desktop use.
+  scene.setAttribute('vr-mode-ui', 'enabled: false');
+  if (window.AFRAME?.components?.['device-orientation-permission-ui']) {
+    scene.setAttribute('device-orientation-permission-ui', 'enabled: false');
+  }
   scene.setAttribute('renderer', 'antialias: true; colorManagement: true');
   scene.className = 'vrScene';
   scene.style.cursor = 'grab';
@@ -486,7 +491,16 @@ function createVrViewer(pathValue) {
   };
 
   const actions = document.createElement('div');
-  actions.className = 'previewActions';
+  actions.className = 'previewActions vrOverlayActions';
+
+  const exitBtn = document.createElement('button');
+  exitBtn.className = 'btn';
+  exitBtn.type = 'button';
+  exitBtn.textContent = 'Normal';
+  exitBtn.onclick = () => {
+    root.dispatchEvent(new CustomEvent('ma-vr-exit', { bubbles: true }));
+  };
+  actions.appendChild(exitBtn);
 
   const playBtn = document.createElement('button');
   playBtn.className = 'btn';
@@ -541,8 +555,12 @@ function createVrViewer(pathValue) {
   actions.appendChild(fov90);
   actions.appendChild(fov110);
 
-  root.appendChild(scene);
-  root.appendChild(actions);
+  const wrap = document.createElement('div');
+  wrap.className = 'vrSceneWrap';
+  wrap.appendChild(scene);
+  wrap.appendChild(actions);
+
+  root.appendChild(wrap);
 
   applyViewMode();
 
@@ -640,6 +658,15 @@ function renderMediaPreview(analysisOrPath) {
 
     let vr = null;
     let vrOn = false;
+
+    const exitVrViewer = () => {
+      if (!vrOn) return;
+      if (vr?.videoEl && typeof vr.videoEl.pause === 'function') vr.videoEl.pause();
+      preview.replaceChild(media, vr.root);
+      vrBtn.textContent = 'VR';
+      vrOn = false;
+    };
+
     vrBtn.onclick = async () => {
       try {
         if (!vrOn) {
@@ -647,15 +674,13 @@ function renderMediaPreview(analysisOrPath) {
           await ensureAframeLoaded();
           if (typeof media.pause === 'function') media.pause();
           vr = createVrViewer(pathValue);
+          vr.root.addEventListener('ma-vr-exit', exitVrViewer);
           preview.replaceChild(vr.root, media);
           vrBtn.textContent = 'Normal';
           vrOn = true;
           setStatus('', false);
         } else {
-          if (vr?.videoEl && typeof vr.videoEl.pause === 'function') vr.videoEl.pause();
-          preview.replaceChild(media, vr.root);
-          vrBtn.textContent = 'VR';
-          vrOn = false;
+          exitVrViewer();
         }
       } catch (e) {
         setStatus(e?.message || 'Failed to start VR viewer.', false);
