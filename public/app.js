@@ -19,6 +19,88 @@ const searchFilters = {
 
 const el = (id) => document.getElementById(id);
 
+let detailsModalEl = null;
+function ensureDetailsModal() {
+  if (detailsModalEl) return detailsModalEl;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modalOverlay';
+  overlay.style.display = 'none';
+
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+
+  const header = document.createElement('div');
+  header.className = 'modalHeader';
+
+  const title = document.createElement('div');
+  title.className = 'modalTitle';
+  title.textContent = 'Details';
+
+  const close = document.createElement('button');
+  close.className = 'btn modalClose';
+  close.type = 'button';
+  close.textContent = 'Close';
+
+  const body = document.createElement('div');
+
+  const closeModal = () => {
+    overlay.style.display = 'none';
+    body.innerHTML = '';
+  };
+
+  close.onclick = closeModal;
+  overlay.addEventListener('click', (ev) => {
+    if (ev.target === overlay) closeModal();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (overlay.style.display !== 'none' && ev.key === 'Escape') closeModal();
+  });
+
+  header.appendChild(title);
+  header.appendChild(close);
+  modal.appendChild(header);
+  modal.appendChild(body);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  detailsModalEl = { overlay, title, body, closeModal };
+  return detailsModalEl;
+}
+
+async function showDetailsModal(pathValue) {
+  const m = ensureDetailsModal();
+  m.title.textContent = pathValue;
+  m.body.innerHTML = '<div class="muted small">Loading…</div>';
+  m.overlay.style.display = 'flex';
+
+  try {
+    if (!analysisByPath.has(pathValue)) {
+      try {
+        const dataDb = await loadFromDb([pathValue]);
+        const r = Array.isArray(dataDb.results) ? dataDb.results[0] : null;
+        if (r && r.path) analysisByPath.set(r.path, r);
+      } catch {
+        // ignore; fall back to on-demand analyze
+      }
+
+      if (!analysisByPath.has(pathValue)) {
+        setStatus('Analyzing file…');
+        await analyzeOne(pathValue);
+      }
+    }
+
+    const analysis = analysisByPath.get(pathValue) ?? { path: pathValue, error: 'Not analyzed yet' };
+    m.body.innerHTML = '';
+    m.body.appendChild(renderAnalysisDetails(analysis));
+    setStatus('');
+  } catch (e) {
+    m.body.innerHTML = '';
+    m.body.appendChild(renderAnalysisDetails({ path: pathValue, error: e?.message || 'Failed to load details' }));
+    setStatus(e?.message || 'Failed to load details');
+  }
+}
+
 function setActiveTab(tabName) {
   const allPanels = Array.from(document.querySelectorAll('.tabPanel'));
   for (const p of allPanels) {
@@ -151,9 +233,32 @@ function createVrViewer(pathValue) {
   scene.setAttribute('vr-mode-ui', 'enabled: true');
   scene.setAttribute('renderer', 'antialias: true; colorManagement: true');
   scene.className = 'vrScene';
-  scene.style.cursor = 'pointer';
-  scene.title = 'Click to fullscreen';
-  scene.addEventListener('click', () => requestFullscreenSafe(root));
+  scene.style.cursor = 'grab';
+  scene.title = 'Drag to look around. Click to fullscreen.';
+
+  // Allow drag-to-look without pointer lock, and only fullscreen on a click that wasn't a drag.
+  let downX = 0;
+  let downY = 0;
+  let moved = false;
+  scene.addEventListener('mousedown', (ev) => {
+    moved = false;
+    downX = ev.clientX;
+    downY = ev.clientY;
+    scene.style.cursor = 'grabbing';
+  });
+  scene.addEventListener('mousemove', (ev) => {
+    if (scene.style.cursor !== 'grabbing') return;
+    const dx = Math.abs(ev.clientX - downX);
+    const dy = Math.abs(ev.clientY - downY);
+    if (dx > 6 || dy > 6) moved = true;
+  });
+  scene.addEventListener('mouseup', () => {
+    scene.style.cursor = 'grab';
+    if (!moved) requestFullscreenSafe(root);
+  });
+  scene.addEventListener('mouseleave', () => {
+    scene.style.cursor = 'grab';
+  });
 
   const assets = document.createElement('a-assets');
   assets.appendChild(vid);
@@ -164,7 +269,8 @@ function createVrViewer(pathValue) {
 
   const cam = document.createElement('a-entity');
   cam.setAttribute('camera', '');
-  cam.setAttribute('look-controls', '');
+  cam.setAttribute('look-controls', 'pointerLockEnabled: false');
+  cam.setAttribute('wasd-controls', 'acceleration: 25');
   cam.setAttribute('position', '0 0 0');
 
   scene.appendChild(assets);
@@ -261,44 +367,54 @@ function renderMediaPreview(analysisOrPath) {
   if (!media) return null;
   preview.appendChild(media);
 
-  if (kind === 'video') {
+  function isLikelyVrVideo(a) {
+    if (!a || typeof a !== 'object') return false;
+    if (a.kind !== 'video') return false;
+
+    const w = a?.video?.width;
+    const h = a?.video?.height;
+    if (typeof w !== 'number' || typeof h !== 'number' || w <= 0 || h <= 0) return false;
+
+    // Heuristic: equirectangular 360 video is typically ~2:1 aspect ratio.
+    const ratio = w / h;
+    return ratio >= 1.8 && ratio <= 2.2;
+  }
+
+  if (kind === 'video' && isLikelyVrVideo(typeof analysisOrPath === 'string' ? null : analysisOrPath)) {
     const actions = document.createElement('div');
     actions.className = 'previewActions';
 
-    if (kind === 'video') {
-      const vrBtn = document.createElement('button');
-      vrBtn.className = 'btn';
-      vrBtn.textContent = 'VR';
+    const vrBtn = document.createElement('button');
+    vrBtn.className = 'btn';
+    vrBtn.textContent = 'VR';
 
-      let vr = null;
-      let vrOn = false;
-      vrBtn.onclick = async () => {
-        try {
-          if (!vrOn) {
-            setStatus('Loading VR viewer…', true);
-            await ensureAframeLoaded();
-            if (typeof media.pause === 'function') media.pause();
-            vr = createVrViewer(pathValue);
-            preview.replaceChild(vr.root, media);
-            vrBtn.textContent = 'Normal';
-            vrOn = true;
-            setStatus('', false);
-          } else {
-            if (vr?.videoEl && typeof vr.videoEl.pause === 'function') vr.videoEl.pause();
-            preview.replaceChild(media, vr.root);
-            vrBtn.textContent = 'VR';
-            vrOn = false;
-          }
-        } catch (e) {
-          setStatus(e?.message || 'Failed to start VR viewer.', false);
-        } finally {
-          setBusy(false);
+    let vr = null;
+    let vrOn = false;
+    vrBtn.onclick = async () => {
+      try {
+        if (!vrOn) {
+          setStatus('Loading VR viewer…', true);
+          await ensureAframeLoaded();
+          if (typeof media.pause === 'function') media.pause();
+          vr = createVrViewer(pathValue);
+          preview.replaceChild(vr.root, media);
+          vrBtn.textContent = 'Normal';
+          vrOn = true;
+          setStatus('', false);
+        } else {
+          if (vr?.videoEl && typeof vr.videoEl.pause === 'function') vr.videoEl.pause();
+          preview.replaceChild(media, vr.root);
+          vrBtn.textContent = 'VR';
+          vrOn = false;
         }
-      };
+      } catch (e) {
+        setStatus(e?.message || 'Failed to start VR viewer.', false);
+      } finally {
+        setBusy(false);
+      }
+    };
 
-      actions.appendChild(vrBtn);
-    }
-
+    actions.appendChild(vrBtn);
     preview.appendChild(actions);
   }
 
@@ -860,46 +976,11 @@ function renderBrowse(data) {
 
       const btnDetails = document.createElement('button');
       btnDetails.className = 'btn';
-      btnDetails.textContent = expanded.has(p) ? 'Hide' : 'Details';
-      btnDetails.onclick = async () => {
-        if (expanded.has(p)) {
-          expanded.delete(p);
-          browse(currentPath);
-          return;
-        }
-
-        expanded.add(p);
-        setStatus('Loading details…');
-        try {
-          if (!analysisByPath.has(p)) {
-            try {
-              const dataDb = await loadFromDb([p]);
-              const r = Array.isArray(dataDb.results) ? dataDb.results[0] : null;
-              if (r && r.path) analysisByPath.set(r.path, r);
-            } catch {
-              // ignore; fall back to on-demand analyze
-            }
-
-            if (!analysisByPath.has(p)) {
-              setStatus('Analyzing file…');
-              await analyzeOne(p);
-            }
-          }
-          setStatus('');
-        } catch (e) {
-          setStatus(e.message);
-        }
-        browse(currentPath);
-      };
+      btnDetails.textContent = 'Details';
+      btnDetails.onclick = () => showDetailsModal(p);
 
       actions.appendChild(btnDetails);
       li.appendChild(actions);
-
-      if (expanded.has(p)) {
-        const analysis = analysisByPath.get(p);
-        const details = renderAnalysisDetails(analysis ?? { path: p, error: 'Not analyzed yet' }, { includePreview: false });
-        li.appendChild(details);
-      }
       fileList.appendChild(li);
       continue;
     }
@@ -911,51 +992,11 @@ function renderBrowse(data) {
 
     const btnDetails = document.createElement('button');
     btnDetails.className = 'btn';
-    btnDetails.textContent = expanded.has(p) ? 'Hide' : 'Details';
-    btnDetails.onclick = async () => {
-      if (expanded.has(p)) {
-        expanded.delete(p);
-        browse(currentPath);
-        return;
-      }
-
-      expanded.add(p);
-      setStatus('Loading details…');
-      try {
-        if (!analysisByPath.has(p)) {
-          // Prefer DB if available
-          try {
-            const data = await loadFromDb([p]);
-            const r = Array.isArray(data.results) ? data.results[0] : null;
-            if (r && r.path && !r.error) {
-              analysisByPath.set(r.path, r);
-            }
-          } catch {
-            // ignore; fall back to on-demand analyze
-          }
-
-          if (!analysisByPath.has(p)) {
-            setStatus('Analyzing file…');
-            await analyzeOne(p);
-          }
-        }
-        setStatus('');
-      } catch (e) {
-        setStatus(e.message);
-      }
-      browse(currentPath);
-    };
+    btnDetails.textContent = 'Details';
+    btnDetails.onclick = () => showDetailsModal(p);
 
     li.appendChild(btnDetails);
     fileList.appendChild(li);
-
-    if (expanded.has(p)) {
-      const analysis = analysisByPath.get(p);
-      const detailsRow = document.createElement('li');
-      detailsRow.className = 'detailsRow';
-      detailsRow.appendChild(renderAnalysisDetails(analysis ?? { path: p, error: 'Not analyzed yet' }));
-      fileList.appendChild(detailsRow);
-    }
   }
 }
 
